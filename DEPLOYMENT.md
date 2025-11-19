@@ -75,7 +75,7 @@ This guide will help you deploy your Four Seasons Room Service Agent to Render u
    - Visit: https://console.twilio.com/
    - Navigate to: Phone Numbers → Manage → Active Numbers
 
-2. **Configure Your Phone Number** (+18566991536):
+2. **Configure Your Phone Number**:
    - Click on your phone number
    - Scroll to "Voice & Fax" section
    - Under "A CALL COMES IN", set:
@@ -94,7 +94,7 @@ This guide will help you deploy your Four Seasons Room Service Agent to Render u
    - You should see: "Four Seasons Room Service Agent is running!"
 
 2. **Make a Test Call**:
-   - Call your Twilio number: +18566991536
+   - Call your Twilio phone number
    - The agent should answer and help with menu inquiries!
 
 ## Automatic Deployments

@@ -15,7 +15,7 @@ A voice-enabled phone agent for Four Seasons Toronto room service that helps gue
 ### Prerequisites
 
 - Python 3.8+
-- Twilio account with a phone number (already configured: +18566991536)
+- Twilio account with a phone number
 - OpenAI API key (optional, for advanced conversation handling)
 - GitHub account (for deployment)
 - Render account (free tier available at https://render.com)
