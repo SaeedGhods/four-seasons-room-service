@@ -22,9 +22,9 @@ In your Render dashboard, configure these settings:
 Click "Advanced" → "Environment Variables" and add:
 
 ```
-TWILIO_ACCOUNT_SID=AC36ff73cbbfb07d269517144a89ccb775
-TWILIO_AUTH_TOKEN=cec236a8769009bda915975b80bd7b3c
-TWILIO_PHONE_NUMBER=+18566991536
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=your_twilio_phone_number
 OPENAI_API_KEY=your_openai_api_key_here (optional)
 PORT=5000
 ```
@@ -57,7 +57,7 @@ You have two options:
 
 1. Go to: https://console.twilio.com/
 2. Navigate to: **Phone Numbers** → **Manage** → **Active Numbers**
-3. Click on your phone number: `+18566991536`
+3. Click on your Twilio phone number
 4. Scroll to **"Voice & Fax"** section
 5. Under **"A CALL COMES IN"**:
    - **Webhook URL:** `https://YOUR_RENDER_URL.onrender.com/voice`
@@ -69,7 +69,7 @@ You have two options:
 
 ### Step 8: Test!
 
-1. Call your Twilio number: `+18566991536`
+1. Call your Twilio phone number
 2. The agent should answer and help with menu inquiries! 🎉
 
 ## Troubleshooting
