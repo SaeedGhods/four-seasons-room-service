@@ -28,6 +28,7 @@ class RoomServiceAgent:
         self.active_orders: Dict[str, List[Dict]] = {}
         self.room_numbers: Dict[str, str] = {}  # Store room numbers per call
         self.awaiting_room_number: Dict[str, bool] = {}  # Track if we're waiting for room number
+        self.order_complete: Dict[str, bool] = {}  # Track if order has been placed
         
     def get_conversation_context(self, call_sid: str) -> str:
         """Get conversation history as context"""
@@ -142,18 +143,29 @@ class RoomServiceAgent:
                     self.active_orders[call_sid].append(order_item)
                     print(f"Added {item['name']} to order for call {call_sid}")
         
-        # Check if user wants to place/complete order
-        if any(word in message_lower for word in ["place order", "checkout", "complete", "finish", "that's all", "done", "finalize"]):
-            order = self.active_orders.get(call_sid, [])
-            if order:
-                # Check if we have room number
-                if call_sid not in self.room_numbers or not self.room_numbers[call_sid]:
-                    # Need to ask for room number first
-                    self.awaiting_room_number[call_sid] = True
-                    print(f"Order ready but missing room number for call {call_sid}")
-                else:
-                    # We have room number, place the order and send email
-                    self.place_order(call_sid)
+        # Check if user wants to place/complete order - expanded keywords
+        order_keywords = ["place order", "checkout", "complete", "finish", "that's all", "that's it", 
+                         "that is all", "that is it", "done", "finalize", "ready", "i'm done", 
+                         "im done", "all set", "goodbye", "bye", "thank you", "thanks"]
+        
+        wants_to_complete = any(word in message_lower for word in order_keywords)
+        order = self.active_orders.get(call_sid, [])
+        
+        # If user has items and wants to complete, or says goodbye with items, place order
+        if wants_to_complete and order:
+            print(f"[ORDER] User wants to complete order. Items: {len(order)}, Room: {self.room_numbers.get(call_sid, 'NOT SET')}")
+            # Check if we have room number
+            if call_sid not in self.room_numbers or not self.room_numbers[call_sid]:
+                # Need to ask for room number first
+                self.awaiting_room_number[call_sid] = True
+                print(f"[ORDER] Order ready but missing room number for call {call_sid}")
+            else:
+                # We have room number, place the order and send email
+                print(f"[ORDER] Room number present, placing order...")
+                order_placed = self.place_order(call_sid)
+                if order_placed:
+                    # Mark that order is complete
+                    self.order_complete[call_sid] = True
         
         # Extract room number if user provides it
         import re
@@ -180,7 +192,10 @@ class RoomServiceAgent:
         if room_provided and self.awaiting_room_number.get(call_sid, False):
             order = self.active_orders.get(call_sid, [])
             if order:
-                self.place_order(call_sid)
+                print(f"[ORDER] Room number provided, placing order automatically...")
+                order_placed = self.place_order(call_sid)
+                if order_placed:
+                    self.order_complete[call_sid] = True
         
         # Build comprehensive context for xAI (Grok)
         context = self.get_conversation_context(call_sid)
@@ -196,9 +211,11 @@ class RoomServiceAgent:
         order_status = ""
         if order:
             if awaiting_room and not has_room:
-                order_status = "IMPORTANT: The customer wants to place an order but hasn't provided their room number yet. You MUST ask for their room number in a friendly way before confirming the order."
-            elif has_room:
-                order_status = f"The customer has provided room number {self.room_numbers[call_sid]}. If they confirm the order, it will be placed automatically."
+                order_status = "CRITICAL: The customer wants to place an order but hasn't provided their room number yet. You MUST ask for their room number NOW in a friendly, direct way. Say something like 'May I have your room number, please?' or 'What room number should I deliver this to?'"
+            elif has_room and not self.order_complete.get(call_sid, False):
+                order_status = f"The customer has provided room number {self.room_numbers[call_sid]}. If they confirm they're done or say goodbye, the order will be placed automatically."
+            elif self.order_complete.get(call_sid, False):
+                order_status = "The order has already been placed. Thank the customer and wish them a pleasant stay."
         
         prompt = f"""You are Nasrin, a warm and professional room service concierge at Four Seasons Hotel Toronto. You're speaking on the phone, so be natural, conversational, and concise.
 
@@ -223,8 +240,9 @@ YOUR RESPONSE GUIDELINES:
 - When they ask about menu items: give them the item name, brief description, and price clearly
 - When they order something: warmly confirm what they ordered and the price
 - When they want to review their order: clearly list each item and the total
-- When placing order: {"Ask for their room number in a friendly way: 'May I have your room number, please?'" if awaiting_room and not has_room and order else "Confirm the order total and delivery time (30-45 minutes) warmly"}
-- If they provide a room number: acknowledge it warmly and confirm you have it
+- When placing order: {"CRITICAL: You MUST ask for their room number RIGHT NOW. Say something like 'Perfect! May I have your room number, please?' or 'What room number should I deliver this to?'" if awaiting_room and not has_room and order else "Confirm the order total and delivery time (30-45 minutes) warmly, then thank them"}
+- If they provide a room number: acknowledge it warmly, confirm the order is placed, and thank them
+- If they say goodbye or seem done: {"Ask for room number if you have items but no room number" if order and not has_room else "Thank them warmly and wish them a pleasant stay"}
 - Sound natural and human - avoid robotic phrases"""
 
         # Use xAI (Grok) for all AI responses
@@ -406,6 +424,7 @@ This is an automated order notification from the Four Seasons Room Service Phone
             # Clear order after successful email
             self.active_orders[call_sid] = []
             self.awaiting_room_number[call_sid] = False
+            self.order_complete[call_sid] = True  # Mark order as complete
             print(f"[ORDER] ✅ Order successfully placed and email sent for call {call_sid}, room {room_number}")
             return True
         else:

@@ -576,10 +576,21 @@ def process_speech():
     # Process with agent (xAI/Grok will respond in the detected language)
     agent_response = agent.process_message(call_sid, speech_result)
     
-    # Create TwiML response with OpenAI TTS for superior voice quality
+    # Check if order is complete - if so, end the call gracefully
+    order_complete = agent.order_complete.get(call_sid, False)
+    
+    # Create TwiML response
     response = VoiceResponse()
     base_url = get_base_url()
     say_with_gcp_tts(response, agent_response, current_lang, base_url)
+    
+    # If order is complete, end the call after a brief pause
+    if order_complete:
+        print(f"[CALL] Order complete for {call_sid}, ending call gracefully")
+        # Add a brief pause, then hangup
+        response.pause(length=1)
+        response.hangup()
+        return str(response), 200, {"Content-Type": "text/xml"}
     
     # Continue conversation with language detection
     gather = Gather(
@@ -588,7 +599,7 @@ def process_speech():
         method="POST",
         speech_timeout="auto",
         language="auto",  # Auto-detect language
-        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, yes, no, add, remove, review, checkout, menú, orden, menù, ordine, メニュー, 注文, 菜单, 订单, قائمة, طلب, منو, سفارش, بله, نه, فهرست, غذا, قیمت, اضافه, حذف, بررسی, پرداخت"
+        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, yes, no, add, remove, review, checkout, room, number, menú, orden, menù, ordine, メニュー, 注文, 菜单, 订单, قائمة, طلب, منو, سفارش, بله, نه, فهرست, غذا, قیمت, اضافه, حذف, بررسی, پرداخت"
     )
     response.append(gather)
     
