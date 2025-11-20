@@ -5,23 +5,24 @@ Handles conversations about menu items and takes orders
 
 import os
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Dict, List
 from menu_data import MENU_CATEGORIES, search_menu, get_category_items, SERVICE_CHARGE_PERCENT, DELIVERY_FEE
-import google.generativeai as genai
 
 class RoomServiceAgent:
     def __init__(self):
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key and gemini_key != "your_gemini_api_key":
-            genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
-            print(f"Gemini API configured successfully")
+        xai_key = os.getenv("XAI_API_KEY")
+        if xai_key:
+            self.xai_api_key = xai_key
+            self.xai_model = "grok-2-1212"  # Latest Grok model
+            print(f"xAI (Grok) API configured successfully")
         else:
-            self.gemini_model = None
-            print("Gemini API key not found")
+            self.xai_api_key = None
+            self.xai_model = None
+            print("xAI API key not found")
         
         self.conversation_history: Dict[str, List[Dict]] = {}
         self.active_orders: Dict[str, List[Dict]] = {}
@@ -107,7 +108,7 @@ class RoomServiceAgent:
         return menu_text
     
     def process_message(self, call_sid: str, user_message: str) -> str:
-        """Process user message and generate response using Grok for all responses"""
+        """Process user message and generate response using xAI (Grok) for all responses"""
         # Store user message
         if call_sid not in self.conversation_history:
             self.conversation_history[call_sid] = []
@@ -181,7 +182,7 @@ class RoomServiceAgent:
             if order:
                 self.place_order(call_sid)
         
-        # Build comprehensive context for Grok
+        # Build comprehensive context for xAI (Grok)
         context = self.get_conversation_context(call_sid)
         menu_info = self.get_detailed_menu_info()
         order_info = self.get_current_order_info(call_sid)
@@ -213,12 +214,12 @@ INSTRUCTIONS:
 - If they provide a room number: acknowledge it warmly
 - Answer questions directly without extra fluff"""
 
-        # Use Gemini for all AI responses
-        if self.gemini_model:
-            print(f"Calling Gemini for message: {user_message[:50]}...")
-            response = self._call_gemini(prompt, call_sid)
+        # Use xAI (Grok) for all AI responses
+        if self.xai_api_key:
+            print(f"Calling xAI (Grok) for message: {user_message[:50]}...")
+            response = self._call_xai(prompt, call_sid)
         else:
-            print("Gemini not available, using default response")
+            print("xAI not available, using default response")
             response = "How can I help you with our menu today?"
         
         # Store agent response
@@ -229,11 +230,15 @@ INSTRUCTIONS:
         
         return response
 
-    def _call_gemini(self, prompt: str, call_sid: str) -> str:
-        """Generate response using Google Gemini - cleaner architecture with better multilingual support"""
+    def _call_xai(self, prompt: str, call_sid: str) -> str:
+        """Generate response using xAI (Grok) API"""
         try:
             # Build conversation history for context
-            chat_history = []
+            messages = []
+            
+            # System instruction
+            system_instruction = "You are Nasrin, room service concierge at Four Seasons Toronto. Be professional, helpful, and concise. Keep responses short (1-2 sentences). ALWAYS respond in the SAME LANGUAGE the user is speaking."
+            messages.append({"role": "system", "content": system_instruction})
             
             # Add recent conversation history if available
             if call_sid in self.conversation_history:
@@ -241,41 +246,36 @@ INSTRUCTIONS:
                     role = msg.get("role", "user")
                     content = msg.get("content", "")
                     if role == "user":
-                        chat_history.append({"role": "user", "parts": [content]})
+                        messages.append({"role": "user", "content": content})
                     elif role == "assistant":
-                        chat_history.append({"role": "model", "parts": [content]})
+                        messages.append({"role": "assistant", "content": content})
             
-            # Configure the model with system instruction
-            system_instruction = "You are Nasrin, room service concierge at Four Seasons Toronto. Be professional, helpful, and concise. Keep responses short (1-2 sentences). ALWAYS respond in the SAME LANGUAGE the user is speaking."
+            # Add current prompt
+            messages.append({"role": "user", "content": prompt})
             
-            # Start a chat session with history if available
-            if chat_history:
-                chat = self.gemini_model.start_chat(history=chat_history)
-                full_prompt = f"{system_instruction}\n\n{prompt}"
-                response = chat.send_message(
-                    full_prompt,
-                    generation_config={
-                        "temperature": 0.7,
-                        "max_output_tokens": 150,  # Shorter responses
-                    }
-                )
-            else:
-                # First message - no history yet
-                full_prompt = f"{system_instruction}\n\n{prompt}"
-                response = self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config={
-                        "temperature": 0.7,
-                        "max_output_tokens": 150,  # Shorter responses
-                    }
-                )
+            # Call xAI API
+            url = "https://api.x.ai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.xai_api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "model": self.xai_model,
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 150  # Shorter responses for phone
+            }
             
-            gemini_response = response.text.strip()
-            print(f"Gemini response received: {gemini_response[:100]}...")
-            return gemini_response
+            response = requests.post(url, headers=headers, json=data, timeout=10)
+            response.raise_for_status()
+            
+            result = response.json()
+            xai_response = result["choices"][0]["message"]["content"].strip()
+            print(f"xAI (Grok) response received: {xai_response[:100]}...")
+            return xai_response
             
         except Exception as e:
-            print(f"Gemini API error: {str(e)}")
+            print(f"xAI API error: {str(e)}")
             import traceback
             traceback.print_exc()
             return "How can I help you with our menu today?"

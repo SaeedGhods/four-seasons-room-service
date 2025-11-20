@@ -572,7 +572,7 @@ def process_speech():
         response.append(gather)
         return str(response), 200, {"Content-Type": "text/xml"}
     
-    # Process with agent (Grok will respond in the detected language)
+    # Process with agent (xAI/Grok will respond in the detected language)
     agent_response = agent.process_message(call_sid, speech_result)
     
     # Create TwiML response with OpenAI TTS for superior voice quality
