@@ -45,6 +45,7 @@ def get_voice_for_language(lang_code):
         "ko-KR": "Seoyeon",
         "zh-CN": "Zhiyu", "zh-TW": "Zhiyu",
         "ar-SA": "Zeina", "ar-EG": "Zeina",
+        "fa-IR": "Zira",  # Farsi/Persian
         "hi-IN": "Aditi",
         "ru-RU": "Tatyana",
         "nl-NL": "Lotte",
@@ -87,6 +88,7 @@ def handle_incoming_call():
         "ja-JP": "こんにちは！フォーシーズンズトロントのルームサービスへようこそ。私はあなたのバーチャルアシスタントで、メニューについてお手伝いし、ご注文をお受けします。どの言語でも自然に話してください。今日はどのようにお手伝いできますか？",
         "zh-CN": "您好！欢迎来到多伦多四季酒店客房服务。我是您的虚拟助手，在这里帮助您了解我们的菜单并接受您的订单。请用任何语言自然地说，我会帮助您。今天我能为您做些什么？",
         "ar-SA": "مرحباً! أهلاً بك في خدمة الغرف في فور سيزونز تورونتو. أنا مساعدك الافتراضي وأنا هنا لمساعدتك في قائمة الطعام وأخذ طلبك. يرجى التحدث بشكل طبيعي بأي لغة وسأساعدك. كيف يمكنني مساعدتك اليوم؟",
+        "fa-IR": "سلام! به سرویس اتاق هتل فور سیزونز تورنتو خوش آمدید. من دستیار مجازی شما هستم و اینجا هستم تا به شما در مورد منوی ما کمک کنم و سفارش شما را بگیرم. لطفاً به هر زبانی که راحت هستید صحبت کنید و من به شما کمک خواهم کرد. امروز چطور می‌توانم به شما کمک کنم؟",
         "hi-IN": "नमस्ते! फोर सीज़न्स टोरंटो रूम सर्विस में आपका स्वागत है। मैं आपका वर्चुअल असिस्टेंट हूं और मैं यहां आपकी मेनू के साथ मदद करने और आपका ऑर्डर लेने के लिए हूं। कृपया किसी भी भाषा में स्वाभाविक रूप से बोलें और मैं आपकी मदद करूंगा। आज मैं आपकी कैसे मदद कर सकता हूं?",
         "ru-RU": "Здравствуйте! Добро пожаловать в службу номеров Four Seasons Toronto. Я ваш виртуальный помощник и здесь, чтобы помочь вам с нашим меню и принять ваш заказ. Пожалуйста, говорите естественно на любом языке, и я помогу вам. Чем я могу вам помочь сегодня?",
         "pt-BR": "Olá! Bem-vindo ao serviço de quarto do Four Seasons Toronto. Sou seu assistente virtual e estou aqui para ajudá-lo com nosso cardápio e fazer seu pedido. Por favor, fale naturalmente em qualquer idioma e eu o ajudarei. Como posso ajudá-lo hoje?",
@@ -107,7 +109,7 @@ def handle_incoming_call():
         method="POST",
         speech_timeout="auto",
         language="auto",  # Auto-detect language
-        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, menú, orden, precio, menù, ordine, prezzo, メニュー, 注文, 価格, 菜单, 订单, 价格, قائمة, طلب, سعر"
+        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, menú, orden, precio, menù, ordine, prezzo, メニュー, 注文, 価格, 菜单, 订单, 价格, قائمة, طلب, سعر, منو, سفارش, قیمت"
     )
     response.append(gather)
     
@@ -152,6 +154,7 @@ def process_speech():
             "ja-JP": "聞き取れませんでした。もう一度言っていただけますか？",
             "zh-CN": "我没听清楚。请您再说一遍好吗？",
             "ar-SA": "لم أفهم ذلك. هل يمكنك التكرار من فضلك؟",
+            "fa-IR": "متوجه نشدم. لطفاً دوباره بگویید؟",
             "hi-IN": "मैं समझ नहीं पाया। क्या आप कृपया दोहरा सकते हैं?",
             "ru-RU": "Я не понял. Не могли бы вы повторить?",
             "pt-BR": "Não entendi. Você poderia repetir, por favor?",
@@ -185,7 +188,7 @@ def process_speech():
         method="POST",
         speech_timeout="auto",
         language="auto",  # Auto-detect language
-        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, yes, no, add, remove, review, checkout, menú, orden, menù, ordine, メニュー, 注文, 菜单, 订单, قائمة, طلب"
+        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, yes, no, add, remove, review, checkout, menú, orden, menù, ordine, メニュー, 注文, 菜单, 订单, قائمة, طلب, منو, سفارش, بله, نه"
     )
     response.append(gather)
     
@@ -199,6 +202,7 @@ def process_speech():
         "ja-JP": "他に何かお手伝いできることはありますか？",
         "zh-CN": "还有什么我可以帮助您的吗？",
         "ar-SA": "هل هناك أي شيء آخر يمكنني مساعدتك فيه؟",
+        "fa-IR": "چیز دیگری هست که بتوانم کمکتان کنم؟",
         "hi-IN": "क्या मैं आपकी और किसी चीज़ में मदद कर सकता हूं?",
         "ru-RU": "Могу ли я еще чем-то помочь?",
         "pt-BR": "Há mais alguma coisa com que eu possa ajudá-lo?",
