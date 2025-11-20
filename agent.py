@@ -4,7 +4,8 @@ Handles conversations about menu items and takes orders
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List
+import requests
 from menu_data import MENU_CATEGORIES, search_menu, get_category_items, SERVICE_CHARGE_PERCENT, DELIVERY_FEE
 from openai import OpenAI
 
@@ -12,8 +13,15 @@ class RoomServiceAgent:
     def __init__(self):
         openai_key = os.getenv("OPENAI_API_KEY")
         self.openai_client = OpenAI(api_key=openai_key) if openai_key and openai_key != "your_openai_api_key" else None
+        self.xai_api_key = os.getenv("XAI_API_KEY")
+        self.xai_model = os.getenv("XAI_MODEL", "grok-4-1-fast-reasoning")
         self.conversation_history: Dict[str, List[Dict]] = {}
         self.active_orders: Dict[str, List[Dict]] = {}
+        
+        # Debug logging
+        print(f"XAI_API_KEY loaded: {'Yes' if self.xai_api_key else 'No'}")
+        if self.xai_api_key:
+            print(f"XAI_API_KEY length: {len(self.xai_api_key)}")
         
     def get_conversation_context(self, call_sid: str) -> str:
         """Get conversation history as context"""
@@ -61,8 +69,40 @@ class RoomServiceAgent:
             response += f" And {len(items) - 5} more items."
         return response
     
+    def get_current_order_info(self, call_sid: str) -> str:
+        """Get formatted information about current order"""
+        order = self.active_orders.get(call_sid, [])
+        if not order:
+            return "No items in current order."
+        
+        info = "Current order:\n"
+        total = 0
+        for item in order:
+            info += f"- {item['name']} - ${item['price']:.2f}\n"
+            total += item['price']
+        service_charge = total * (SERVICE_CHARGE_PERCENT / 100)
+        final_total = total + service_charge + DELIVERY_FEE
+        info += f"Subtotal: ${total:.2f}\n"
+        info += f"Service charge ({SERVICE_CHARGE_PERCENT}%): ${service_charge:.2f}\n"
+        info += f"Delivery fee: ${DELIVERY_FEE:.2f}\n"
+        info += f"Total: ${final_total:.2f}"
+        return info
+    
+    def get_detailed_menu_info(self) -> str:
+        """Get detailed menu information for AI context"""
+        menu_text = "MENU ITEMS:\n\n"
+        for category_key, category in MENU_CATEGORIES.items():
+            menu_text += f"{category['name']}:\n"
+            for item in category['items']:
+                menu_text += f"  - {item['name']}: ${item['price']:.2f}"
+                if item.get('description'):
+                    menu_text += f" - {item['description']}"
+                menu_text += "\n"
+            menu_text += "\n"
+        return menu_text
+    
     def process_message(self, call_sid: str, user_message: str) -> str:
-        """Process user message and generate response"""
+        """Process user message and generate response using Grok for all responses"""
         # Store user message
         if call_sid not in self.conversation_history:
             self.conversation_history[call_sid] = []
@@ -73,160 +113,73 @@ class RoomServiceAgent:
             "content": user_message
         })
         
-        # Check for menu queries
+        # Handle order actions (add/remove items) before AI call
         message_lower = user_message.lower()
         
-        # Greeting
-        if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]):
-            response = "Hello! Welcome to Four Seasons Toronto room service. I'm here to help you with our menu and take your order. How can I assist you today?"
-        
-        # Menu categories request
-        elif any(word in message_lower for word in ["menu", "what do you have", "what's available", "options", "categories"]):
-            response = self.get_menu_summary()
-            response += " What would you like to know more about?"
-        
-        # Search for specific items
-        elif any(word in message_lower for word in ["search", "find", "looking for", "have", "do you have"]):
-            # Extract search terms
+        # Check if user wants to add item to order
+        if any(word in message_lower for word in ["i want", "i'd like", "add", "get me", "order", "i'll take"]):
+            # Try to find menu item
             search_terms = user_message
-            for word in ["search", "find", "looking for", "have", "do you have", "i want", "i'd like"]:
+            for word in ["order", "i'll take", "i want", "i'd like", "add", "get me", "please", "can i have"]:
                 search_terms = search_terms.replace(word, "").strip()
             
             if search_terms:
                 items = search_menu(search_terms)
-                response = self.format_item_response(items)
-            else:
-                response = "What item would you like to search for?"
+                if items:
+                    # Add first matching item to order
+                    item = items[0]
+                    order_item = {
+                        "name": item["name"],
+                        "price": item["price"],
+                        "quantity": 1
+                    }
+                    self.active_orders[call_sid].append(order_item)
+                    print(f"Added {item['name']} to order for call {call_sid}")
         
-        # Category-specific queries
-        elif any(word in message_lower for word in ["appetizer", "starter", "share", "soup", "salad", "sandwich", "entree", "main", "pasta", "dessert", "side"]):
-            category_map = {
-                "appetizer": "to_share",
-                "starter": "to_share",
-                "share": "to_share",
-                "soup": "soups_salads",
-                "salad": "soups_salads",
-                "sandwich": "sandwiches",
-                "entree": "entrees",
-                "main": "entrees",
-                "pasta": "pasta",
-                "dessert": "dessert",
-                "side": "sides"
-            }
-            
-            category_key = None
-            for keyword, key in category_map.items():
-                if keyword in message_lower:
-                    category_key = key
-                    break
-            
-            if category_key:
-                items = MENU_CATEGORIES[category_key]["items"]
-                category_name = MENU_CATEGORIES[category_key]["name"]
-                response = f"Here are our {category_name} options:\n"
-                for item in items[:5]:  # Limit to 5 for voice
-                    response += f"{item['name']} - {item['price']} dollars. "
-                if len(items) > 5:
-                    response += f"We have {len(items) - 5} more items in this category."
-            else:
-                response = "Which category would you like to explore?"
-        
-        # Price queries
-        elif any(word in message_lower for word in ["price", "cost", "how much", "dollar"]):
-            # Try to extract item name
-            items = search_menu(user_message)
-            if items:
-                response = self.format_item_response(items)
-            else:
-                response = "Which item would you like to know the price for?"
-        
-        # Order taking
-        elif any(word in message_lower for word in ["order", "i'll take", "i want", "i'd like", "add", "get me"]):
-            # Extract item name from order
-            order_terms = user_message
-            for word in ["order", "i'll take", "i want", "i'd like", "add", "get me", "please"]:
-                order_terms = order_terms.replace(word, "").strip()
-            
-            items = search_menu(order_terms)
-            if items:
-                # Add first matching item to order
-                item = items[0]
-                order_item = {
-                    "name": item["name"],
-                    "price": item["price"],
-                    "quantity": 1
-                }
-                self.active_orders[call_sid].append(order_item)
-                response = f"Great! I've added {item['name']} to your order. That's {item['price']} dollars. Would you like to add anything else?"
-            else:
-                response = "I couldn't find that item. Could you please specify which item you'd like to order?"
-        
-        # Order review
-        elif any(word in message_lower for word in ["review", "what did i order", "my order", "order summary"]):
+        # Check if user wants to place/complete order
+        if any(word in message_lower for word in ["place order", "checkout", "complete", "finish", "that's all", "done", "finalize"]):
             order = self.active_orders.get(call_sid, [])
             if order:
-                response = "Here's your current order:\n"
-                total = 0
-                for item in order:
-                    response += f"{item['name']} - {item['price']} dollars. "
-                    total += item['price']
-                response += f"\nSubtotal: {total} dollars. "
-                service_charge = total * (SERVICE_CHARGE_PERCENT / 100)
-                final_total = total + service_charge + DELIVERY_FEE
-                response += f"With a {SERVICE_CHARGE_PERCENT} percent service charge and {DELIVERY_FEE} dollar delivery fee, your total is {final_total:.2f} dollars."
-            else:
-                response = "You don't have any items in your order yet. What would you like to order?"
-        
-        # Checkout/Place order
-        elif any(word in message_lower for word in ["place order", "checkout", "complete", "finish", "that's all", "done"]):
-            order = self.active_orders.get(call_sid, [])
-            if order:
-                total = sum(item['price'] for item in order)
-                service_charge = total * (SERVICE_CHARGE_PERCENT / 100)
-                final_total = total + service_charge + DELIVERY_FEE
-                response = f"Perfect! Your order has been placed. Your total is {final_total:.2f} Canadian dollars, including service charge and delivery fee. Your order will arrive in approximately 30 to 45 minutes. Thank you for choosing Four Seasons room service!"
                 # Clear order after placement
                 self.active_orders[call_sid] = []
-            else:
-                response = "You don't have any items in your order yet. What would you like to order?"
+                print(f"Order placed and cleared for call {call_sid}")
         
-        # Use AI for more complex queries
-        else:
-            # Use OpenAI for natural conversation
-            context = self.get_conversation_context(call_sid)
-            menu_info = self.get_menu_summary()
-            
-            prompt = f"""You are a friendly and professional room service agent for Four Seasons Hotel Toronto. 
+        # Build comprehensive context for Grok
+        context = self.get_conversation_context(call_sid)
+        menu_info = self.get_detailed_menu_info()
+        order_info = self.get_current_order_info(call_sid)
+        
+        prompt = f"""You are a friendly and professional room service agent for Four Seasons Hotel Toronto. 
 You help guests with menu inquiries and take orders over the phone.
 
-Menu Information:
 {menu_info}
+
+{order_info}
 
 Recent conversation:
 {context}
 
-User said: {user_message}
+User just said: {user_message}
 
-Respond naturally and helpfully. If they're asking about menu items, provide specific information. 
-If they want to order, help them add items. Keep responses concise for phone conversation (2-3 sentences max).
-Be warm, professional, and helpful."""
+IMPORTANT INSTRUCTIONS:
+- Respond naturally and conversationally (2-3 sentences max for phone)
+- If they're asking about menu items, provide specific information from the menu above
+- If they want to order something, acknowledge it warmly (items are automatically added when they mention wanting something)
+- If they ask about their order, reference the current order information above
+- If they want to place/complete their order, confirm the total and delivery time (30-45 minutes)
+- Be warm, professional, and helpful
+- Keep responses concise and natural for phone conversation"""
 
-            if self.openai_client:
-                try:
-                    completion = self.openai_client.chat.completions.create(
-                        model="gpt-4",
-                        messages=[
-                            {"role": "system", "content": "You are a professional room service agent for Four Seasons Hotel Toronto."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=150,
-                        temperature=0.7
-                    )
-                    response = completion.choices[0].message.content.strip()
-                except Exception as e:
-                    response = "I'm here to help with our menu. Would you like to hear about our categories or search for a specific item?"
-            else:
-                response = "I'm here to help with our menu. Would you like to hear about our categories or search for a specific item?"
+        # Always use Grok if available, fallback to OpenAI, then default
+        if self.xai_api_key:
+            print(f"Calling Grok for message: {user_message[:50]}...")
+            response = self._call_grok(prompt)
+        elif self.openai_client:
+            print(f"Falling back to OpenAI for message: {user_message[:50]}...")
+            response = self._call_openai(prompt)
+        else:
+            print("No AI available, using default response")
+            response = "I'm here to help with our menu. Would you like to hear about our categories or search for a specific item?"
         
         # Store agent response
         self.conversation_history[call_sid].append({
@@ -235,5 +188,57 @@ Be warm, professional, and helpful."""
         })
         
         return response
+
+    def _call_openai(self, prompt: str) -> str:
+        """Generate response using OpenAI Chat Completions."""
+        try:
+            completion = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a professional room service agent for Four Seasons Hotel Toronto."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=150,
+                temperature=0.7
+            )
+            return completion.choices[0].message.content.strip()
+        except Exception:
+            return "I'm here to help with our menu. Would you like to hear about our categories or search for a specific item?"
+
+    def _call_grok(self, prompt: str) -> str:
+        """Generate response using xAI Grok chat completion API."""
+        headers = {
+            "Authorization": f"Bearer {self.xai_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": self.xai_model,
+            "messages": [
+                {"role": "system", "content": "You are a professional room service agent for Four Seasons Hotel Toronto."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 300,
+            "temperature": 0.7
+        }
+        try:
+            print(f"Calling Grok model: {self.xai_model}")
+            response = requests.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            grok_response = data["choices"][0]["message"]["content"].strip()
+            print(f"Grok response received: {grok_response[:100]}...")
+            return grok_response
+        except Exception as e:
+            print(f"Grok API error: {str(e)}")
+            # Fallback to OpenAI if available
+            if self.openai_client:
+                print("Falling back to OpenAI due to Grok error")
+                return self._call_openai(prompt)
+            return "I'm here to help with our menu. Would you like to hear about our categories or search for a specific item?"
 
 
