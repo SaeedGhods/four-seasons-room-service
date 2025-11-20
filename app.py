@@ -311,7 +311,7 @@ def handle_incoming_call():
     
     # Initial greeting in multiple languages with version info
     greetings = {
-        "en-US": f"Greetings from the Four Seasons. This is Nasrin, your dedicated room service concierge. This is version {version}. I speak multiple languages including Farsi, Persian, and many others. Simply say the language name to switch. How may I elevate your experience with a delightful dining moment today?",
+        "en-US": f"Hello, this is Nasrin from Four Seasons room service. Version {version}. I speak multiple languages—say the language name to switch. How can I help you today?",
         "es-ES": f"Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. Esta es la versión {version}. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
         "fr-FR": f"Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Ceci est la version {version}. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
         "de-DE": f"Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Dies ist Version {version}. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
