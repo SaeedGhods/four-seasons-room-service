@@ -13,9 +13,10 @@ import time
 import threading
 from datetime import datetime, timedelta
 import pytz
+import json
 from dotenv import load_dotenv
 from agent import RoomServiceAgent
-from openai import OpenAI
+from google.cloud import texttospeech
 
 load_dotenv()
 
@@ -25,11 +26,25 @@ agent = RoomServiceAgent()
 # Store detected language per call
 call_languages = {}
 
-# OpenAI client for TTS
-openai_client = None
-openai_key = os.getenv("OPENAI_API_KEY")
-if openai_key and openai_key != "your_openai_api_key":
-    openai_client = OpenAI(api_key=openai_key)
+# Google Cloud Text-to-Speech client
+gcp_tts_client = None
+gcp_credentials_json = os.getenv("GCP_CREDENTIALS_JSON")
+if gcp_credentials_json:
+    try:
+        # Parse JSON credentials from environment variable
+        creds_dict = json.loads(gcp_credentials_json)
+        # Write to temp file for Google Cloud client
+        temp_creds_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json')
+        json.dump(creds_dict, temp_creds_file)
+        temp_creds_file.close()
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_creds_file.name
+        gcp_tts_client = texttospeech.TextToSpeechClient()
+        print("Google Cloud TTS initialized successfully")
+    except Exception as e:
+        print(f"Error initializing Google Cloud TTS: {e}")
+        gcp_tts_client = None
+else:
+    print("GCP_CREDENTIALS_JSON not found - TTS will use fallback")
 
 # Store generated audio files temporarily with metadata for cleanup
 audio_cache = {}  # {audio_id: {"path": str, "created": datetime, "text_hash": str}}
@@ -84,38 +99,40 @@ def get_voice_for_language(lang_code):
     # Default to alice for English if language not found
     return voice_map.get(lang_code, "alice")
 
-def get_openai_tts_voice(lang_code):
-    """Get OpenAI TTS voice for language - optimized for each language's characteristics"""
-    # OpenAI TTS voices: alloy (neutral), echo (bright), fable (warm), onyx (deep), nova (smooth), shimmer (clear)
-    # Optimized voice selection based on language phonetics and cultural preferences
+def get_gcp_tts_voice(lang_code):
+    """Get Google Cloud TTS voice name and language code - excellent Farsi support"""
+    # Google Cloud TTS voice mapping - format: (voice_name, language_code)
+    # Google Cloud has native Farsi voices which are much better than OpenAI
     voice_map = {
-        "en-US": "nova",  # Smooth, professional English
-        "es-ES": "shimmer", "es-MX": "shimmer", "es-US": "shimmer",  # Clear, expressive
-        "fr-FR": "alloy", "fr-CA": "alloy",  # Neutral, elegant
-        "de-DE": "onyx",  # Deep, authoritative
-        "it-IT": "echo",  # Bright, expressive
-        "pt-BR": "fable", "pt-PT": "fable",  # Warm, friendly
-        "ja-JP": "nova",  # Smooth, respectful
-        "ko-KR": "shimmer",  # Clear, polite
-        "zh-CN": "alloy", "zh-TW": "alloy",  # Neutral, clear
-        "ar-SA": "onyx", "ar-EG": "onyx",  # Deep, respectful
-        "fa-IR": "alloy",  # OpenAI TTS handles Farsi excellently with alloy voice
-        "hi-IN": "shimmer",  # Clear, warm
-        "ru-RU": "onyx",  # Deep, formal
-        "nl-NL": "echo",  # Bright, friendly
-        "pl-PL": "fable",  # Warm, clear
-        "tr-TR": "alloy",  # Neutral, clear
-        "sv-SE": "nova",  # Smooth, clear
-        "da-DK": "echo",  # Bright, friendly
-        "no-NO": "fable",  # Warm, clear
-        "fi-FI": "shimmer",  # Clear, precise
-        "cs-CZ": "onyx",  # Deep, clear
-        "hu-HU": "echo",  # Bright, expressive
-        "ro-RO": "fable",  # Warm, friendly
-        "th-TH": "alloy",  # Neutral, clear
-        "vi-VN": "shimmer"  # Clear, expressive
+        "en-US": ("en-US-Neural2-F", "en-US"),
+        "es-ES": ("es-ES-Neural2-F", "es-ES"),
+        "es-MX": ("es-MX-Neural2-F", "es-MX"),
+        "fr-FR": ("fr-FR-Neural2-C", "fr-FR"),
+        "de-DE": ("de-DE-Neural2-F", "de-DE"),
+        "it-IT": ("it-IT-Neural2-C", "it-IT"),
+        "pt-BR": ("pt-BR-Neural2-C", "pt-BR"),
+        "ja-JP": ("ja-JP-Neural2-C", "ja-JP"),
+        "ko-KR": ("ko-KR-Neural2-C", "ko-KR"),
+        "zh-CN": ("zh-CN-Neural2-C", "zh-CN"),
+        "zh-TW": ("zh-TW-Neural2-C", "zh-TW"),
+        "ar-SA": ("ar-XA-Wavenet-B", "ar-XA"),  # Arabic
+        "fa-IR": ("fa-IR-Standard-A", "fa-IR"),  # Farsi - Google has native support!
+        "hi-IN": ("hi-IN-Neural2-D", "hi-IN"),
+        "ru-RU": ("ru-RU-Neural2-D", "ru-RU"),
+        "nl-NL": ("nl-NL-Neural2-C", "nl-NL"),
+        "pl-PL": ("pl-PL-Neural2-A", "pl-PL"),
+        "tr-TR": ("tr-TR-Neural2-C", "tr-TR"),
+        "sv-SE": ("sv-SE-Neural2-C", "sv-SE"),
+        "da-DK": ("da-DK-Neural2-D", "da-DK"),
+        "no-NO": ("nb-NO-Neural2-C", "nb-NO"),
+        "fi-FI": ("fi-FI-Neural2-C", "fi-FI"),
+        "cs-CZ": ("cs-CZ-Wavenet-A", "cs-CZ"),
+        "hu-HU": ("hu-HU-Neural2-A", "hu-HU"),
+        "ro-RO": ("ro-RO-Neural2-A", "ro-RO"),
+        "th-TH": ("th-TH-Neural2-C", "th-TH"),
+        "vi-VN": ("vi-VN-Neural2-A", "vi-VN")
     }
-    return voice_map.get(lang_code, "nova")  # Default to nova (most versatile)
+    return voice_map.get(lang_code, ("en-US-Neural2-F", "en-US"))
 
 def cleanup_old_audio():
     """Remove audio files older than 1 hour"""
@@ -167,10 +184,10 @@ def get_base_url():
     # Last resort - use the known Render URL
     return "https://four-seasons-room-service-1.onrender.com"
 
-def generate_audio_with_openai(text, lang_code, base_url):
-    """Generate high-quality audio using OpenAI TTS with caching and cleanup"""
-    if not openai_client:
-        print("OpenAI client not available for TTS")
+def generate_audio_with_gcp(text, lang_code, base_url):
+    """Generate high-quality audio using Google Cloud TTS - excellent Farsi support"""
+    if not gcp_tts_client:
+        print("Google Cloud TTS client not available")
         return None
     
     try:
@@ -187,21 +204,36 @@ def generate_audio_with_openai(text, lang_code, base_url):
                 print(f"Using cached audio for text hash: {text_hash[:8]}...")
                 return cached_id
         
-        print(f"Generating new audio for language {lang_code}, text length: {len(text)}")
-        voice = get_openai_tts_voice(lang_code)
+        print(f"Generating new audio with Google Cloud TTS for language {lang_code}, text length: {len(text)}")
+        voice_name, language_code = get_gcp_tts_voice(lang_code)
         
-        # Use HD model for superior quality
-        response = openai_client.audio.speech.create(
-            model="tts-1-hd",  # High-definition quality
+        # Configure the synthesis input
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        
+        # Build the voice request
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=language_code,
+            name=voice_name,
+        )
+        
+        # Select the type of audio file you want returned
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=0.95,  # Slightly slower for clarity
+            pitch=0.0,
+        )
+        
+        # Perform the text-to-speech request
+        response = gcp_tts_client.synthesize_speech(
+            input=synthesis_input,
             voice=voice,
-            input=text,
-            speed=0.95  # Slightly slower for clarity
+            audio_config=audio_config
         )
         
         # Save to temporary file
         audio_id = str(uuid.uuid4())
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3', dir=tempfile.gettempdir())
-        temp_file.write(response.content)
+        temp_file.write(response.audio_content)
         temp_file.close()
         
         file_size = os.path.getsize(temp_file.name)
@@ -226,7 +258,7 @@ def generate_audio_with_openai(text, lang_code, base_url):
         
         return audio_id
     except Exception as e:
-        print(f"Error generating OpenAI TTS audio: {e}")
+        print(f"Error generating Google Cloud TTS audio: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -256,16 +288,16 @@ def serve_audio(audio_id):
         print(f"Audio ID not in cache: {audio_id}, cache size: {len(audio_cache)}")
     return "Audio not found", 404
 
-def say_with_openai_tts(response, text, lang_code, base_url):
-    """Use OpenAI TTS instead of Twilio's built-in TTS for superior voice quality"""
+def say_with_gcp_tts(response, text, lang_code, base_url):
+    """Use Google Cloud TTS for superior voice quality and excellent Farsi support"""
     if not text or not text.strip():
         print("Empty text provided to TTS")
         return False
         
-    if openai_client:
+    if gcp_tts_client:
         try:
-            print(f"Attempting OpenAI TTS for language {lang_code}, text preview: {text[:50]}...")
-            audio_id = generate_audio_with_openai(text, lang_code, base_url)
+            print(f"Attempting Google Cloud TTS for language {lang_code}, text preview: {text[:50]}...")
+            audio_id = generate_audio_with_gcp(text, lang_code, base_url)
             if audio_id:
                 # Use absolute URL for reliable playback
                 audio_url = f"{base_url}/audio/{audio_id}"
@@ -273,13 +305,13 @@ def say_with_openai_tts(response, text, lang_code, base_url):
                 response.play(audio_url)
                 return True
             else:
-                print("OpenAI TTS returned None, falling back to Twilio")
+                print("Google Cloud TTS returned None, falling back to Twilio")
         except Exception as e:
-            print(f"OpenAI TTS failed with exception, falling back to Twilio: {e}")
+            print(f"Google Cloud TTS failed with exception, falling back to Twilio: {e}")
             import traceback
             traceback.print_exc()
     
-    # Fallback to Twilio's Say if OpenAI TTS fails
+    # Fallback to Twilio's Say if Google Cloud TTS fails
     try:
         print(f"Using Twilio TTS fallback for language {lang_code}")
         voice = get_voice_for_language(lang_code)
@@ -328,7 +360,7 @@ def handle_incoming_call():
     # Start with greeting using OpenAI TTS for superior voice quality
     base_url = get_base_url()
     greeting_text = greetings.get(default_lang, greetings["en-US"])
-    say_with_openai_tts(response, greeting_text, default_lang, base_url)
+    say_with_gcp_tts(response, greeting_text, default_lang, base_url)
     
     # Gather user input - support multiple languages
     # Twilio will auto-detect language, but we can specify multiple
@@ -410,7 +442,7 @@ def process_speech():
                 current_lang = lang_code
                 base_url = get_base_url()
                 confirmation_text = lang_confirmations.get(lang_code, lang_confirmations["en-US"])
-                say_with_openai_tts(response, confirmation_text, current_lang, base_url)
+                say_with_gcp_tts(response, confirmation_text, current_lang, base_url)
                 gather = Gather(
                     input="speech",
                     action="/process-speech",
@@ -457,7 +489,7 @@ def process_speech():
             current_lang = lang_code
             base_url = get_base_url()
             confirmation_text = lang_confirmations.get(lang_code, lang_confirmations["en-US"])
-            say_with_openai_tts(response, confirmation_text, current_lang, base_url)
+            say_with_gcp_tts(response, confirmation_text, current_lang, base_url)
             gather = Gather(
                 input="speech",
                 action="/process-speech",
@@ -517,7 +549,7 @@ def process_speech():
     # Create TwiML response with OpenAI TTS for superior voice quality
     response = VoiceResponse()
     base_url = get_base_url()
-    say_with_openai_tts(response, agent_response, current_lang, base_url)
+    say_with_gcp_tts(response, agent_response, current_lang, base_url)
     
     # Continue conversation with language detection
     gather = Gather(
