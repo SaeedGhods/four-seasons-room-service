@@ -9,6 +9,9 @@ from twilio.rest import Client
 import os
 import tempfile
 import uuid
+import time
+import threading
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from agent import RoomServiceAgent
 from openai import OpenAI
@@ -27,8 +30,11 @@ openai_key = os.getenv("OPENAI_API_KEY")
 if openai_key and openai_key != "your_openai_api_key":
     openai_client = OpenAI(api_key=openai_key)
 
-# Store generated audio files temporarily (in production, use a proper storage solution)
-audio_cache = {}
+# Store generated audio files temporarily with metadata for cleanup
+audio_cache = {}  # {audio_id: {"path": str, "created": datetime, "text_hash": str}}
+
+# Cache common responses to avoid regenerating
+response_cache = {}  # {text_hash: audio_id}
 
 # Twilio credentials
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -77,64 +83,120 @@ def get_voice_for_language(lang_code):
     return voice_map.get(lang_code, "alice")
 
 def get_openai_tts_voice(lang_code):
-    """Get OpenAI TTS voice for language - OpenAI has excellent multilingual support"""
-    # OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer
-    # These voices work well across multiple languages
+    """Get OpenAI TTS voice for language - optimized for each language's characteristics"""
+    # OpenAI TTS voices: alloy (neutral), echo (bright), fable (warm), onyx (deep), nova (smooth), shimmer (clear)
+    # Optimized voice selection based on language phonetics and cultural preferences
     voice_map = {
-        "en-US": "nova",  # Warm, natural English
-        "es-ES": "shimmer", "es-MX": "shimmer", "es-US": "shimmer",
-        "fr-FR": "alloy", "fr-CA": "alloy",
-        "de-DE": "onyx",
-        "it-IT": "echo",
-        "pt-BR": "fable", "pt-PT": "fable",
-        "ja-JP": "nova",
-        "ko-KR": "shimmer",
-        "zh-CN": "alloy", "zh-TW": "alloy",
-        "ar-SA": "onyx", "ar-EG": "onyx",
-        "fa-IR": "alloy",  # OpenAI TTS handles Farsi well!
-        "hi-IN": "shimmer",
-        "ru-RU": "onyx",
-        "nl-NL": "echo",
-        "pl-PL": "fable",
-        "tr-TR": "alloy",
-        "sv-SE": "nova",
-        "da-DK": "echo",
-        "no-NO": "fable",
-        "fi-FI": "shimmer",
-        "cs-CZ": "onyx",
-        "hu-HU": "echo",
-        "ro-RO": "fable",
-        "th-TH": "alloy",
-        "vi-VN": "shimmer"
+        "en-US": "nova",  # Smooth, professional English
+        "es-ES": "shimmer", "es-MX": "shimmer", "es-US": "shimmer",  # Clear, expressive
+        "fr-FR": "alloy", "fr-CA": "alloy",  # Neutral, elegant
+        "de-DE": "onyx",  # Deep, authoritative
+        "it-IT": "echo",  # Bright, expressive
+        "pt-BR": "fable", "pt-PT": "fable",  # Warm, friendly
+        "ja-JP": "nova",  # Smooth, respectful
+        "ko-KR": "shimmer",  # Clear, polite
+        "zh-CN": "alloy", "zh-TW": "alloy",  # Neutral, clear
+        "ar-SA": "onyx", "ar-EG": "onyx",  # Deep, respectful
+        "fa-IR": "alloy",  # OpenAI TTS handles Farsi excellently with alloy voice
+        "hi-IN": "shimmer",  # Clear, warm
+        "ru-RU": "onyx",  # Deep, formal
+        "nl-NL": "echo",  # Bright, friendly
+        "pl-PL": "fable",  # Warm, clear
+        "tr-TR": "alloy",  # Neutral, clear
+        "sv-SE": "nova",  # Smooth, clear
+        "da-DK": "echo",  # Bright, friendly
+        "no-NO": "fable",  # Warm, clear
+        "fi-FI": "shimmer",  # Clear, precise
+        "cs-CZ": "onyx",  # Deep, clear
+        "hu-HU": "echo",  # Bright, expressive
+        "ro-RO": "fable",  # Warm, friendly
+        "th-TH": "alloy",  # Neutral, clear
+        "vi-VN": "shimmer"  # Clear, expressive
     }
-    return voice_map.get(lang_code, "nova")  # Default to nova
+    return voice_map.get(lang_code, "nova")  # Default to nova (most versatile)
 
-def generate_audio_with_openai(text, lang_code):
-    """Generate audio using OpenAI TTS and return the file path"""
+def cleanup_old_audio():
+    """Remove audio files older than 1 hour"""
+    try:
+        current_time = datetime.now()
+        to_remove = []
+        for audio_id, metadata in audio_cache.items():
+            if current_time - metadata["created"] > timedelta(hours=1):
+                try:
+                    if os.path.exists(metadata["path"]):
+                        os.remove(metadata["path"])
+                    to_remove.append(audio_id)
+                except Exception as e:
+                    print(f"Error removing audio file {audio_id}: {e}")
+        
+        for audio_id in to_remove:
+            del audio_cache[audio_id]
+            # Also remove from response cache if present
+            if metadata.get("text_hash") in response_cache:
+                del response_cache[metadata["text_hash"]]
+    except Exception as e:
+        print(f"Error in cleanup: {e}")
+
+def get_base_url():
+    """Get the base URL for the service - prefer environment variable, fallback to request"""
+    # Check environment variable first (set in Render)
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BASE_URL")
+    if base_url:
+        return base_url.rstrip('/')
+    # Fallback to request URL
+    try:
+        if request:
+            return request.url_root.rstrip('/')
+    except:
+        pass
+    # Last resort - use the known Render URL
+    return "https://four-seasons-room-service-1.onrender.com"
+
+def generate_audio_with_openai(text, lang_code, base_url):
+    """Generate high-quality audio using OpenAI TTS with caching and cleanup"""
     if not openai_client:
         return None
     
     try:
+        # Create hash for caching
+        import hashlib
+        text_hash = hashlib.md5(f"{text}_{lang_code}".encode()).hexdigest()
+        
+        # Check cache first
+        if text_hash in response_cache:
+            cached_id = response_cache[text_hash]
+            if cached_id in audio_cache:
+                # Update access time
+                audio_cache[cached_id]["created"] = datetime.now()
+                return cached_id
+        
         voice = get_openai_tts_voice(lang_code)
         
-        # Generate audio
+        # Use HD model for superior quality
         response = openai_client.audio.speech.create(
-            model="tts-1",  # or "tts-1-hd" for higher quality
+            model="tts-1-hd",  # High-definition quality
             voice=voice,
             input=text,
-            speed=1.0
+            speed=0.95  # Slightly slower for clarity
         )
         
         # Save to temporary file
         audio_id = str(uuid.uuid4())
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3', dir=tempfile.gettempdir())
         temp_file.write(response.content)
         temp_file.close()
         
-        # Store in cache with public URL reference
-        audio_cache[audio_id] = temp_file.name
+        # Store in cache with metadata
+        audio_cache[audio_id] = {
+            "path": temp_file.name,
+            "created": datetime.now(),
+            "text_hash": text_hash
+        }
+        response_cache[text_hash] = audio_id
         
-        # Return the audio ID (we'll serve it via Flask endpoint)
+        # Cleanup old files in background (non-blocking)
+        threading.Thread(target=cleanup_old_audio, daemon=True).start()
+        
         return audio_id
     except Exception as e:
         print(f"Error generating OpenAI TTS audio: {e}")
@@ -142,28 +204,45 @@ def generate_audio_with_openai(text, lang_code):
 
 @app.route("/audio/<audio_id>")
 def serve_audio(audio_id):
-    """Serve generated audio file"""
+    """Serve generated audio file with proper headers"""
     if audio_id in audio_cache:
-        file_path = audio_cache[audio_id]
-        if os.path.exists(file_path):
-            return send_file(file_path, mimetype='audio/mpeg')
+        metadata = audio_cache[audio_id]
+        file_path = metadata.get("path") if isinstance(metadata, dict) else metadata
+        if file_path and os.path.exists(file_path):
+            response = send_file(file_path, mimetype='audio/mpeg')
+            # Add cache headers for better performance
+            response.headers['Cache-Control'] = 'public, max-age=3600'
+            response.headers['Content-Type'] = 'audio/mpeg'
+            return response
     return "Audio not found", 404
 
 def say_with_openai_tts(response, text, lang_code, base_url):
     """Use OpenAI TTS instead of Twilio's built-in TTS for superior voice quality"""
+    if not text or not text.strip():
+        return False
+        
     if openai_client:
-        audio_id = generate_audio_with_openai(text, lang_code)
-        if audio_id:
-            # Use Play to play the OpenAI-generated audio
-            audio_url = f"{base_url}/audio/{audio_id}"
-            response.play(audio_url)
-            return True
+        try:
+            audio_id = generate_audio_with_openai(text, lang_code, base_url)
+            if audio_id:
+                # Use absolute URL for reliable playback
+                audio_url = f"{base_url}/audio/{audio_id}"
+                response.play(audio_url)
+                return True
+        except Exception as e:
+            print(f"OpenAI TTS failed, falling back to Twilio: {e}")
     
     # Fallback to Twilio's Say if OpenAI TTS fails
-    voice = get_voice_for_language(lang_code)
-    twilio_lang = get_twilio_language_code(lang_code)
-    response.say(text, voice=voice, language=twilio_lang)
-    return False
+    try:
+        voice = get_voice_for_language(lang_code)
+        twilio_lang = get_twilio_language_code(lang_code)
+        response.say(text, voice=voice, language=twilio_lang)
+        return False
+    except Exception as e:
+        print(f"Twilio TTS also failed: {e}")
+        # Last resort: just say it in English
+        response.say(text, voice="alice", language="en-US")
+        return False
 
 @app.route("/voice", methods=["POST"])
 def handle_incoming_call():
@@ -196,7 +275,7 @@ def handle_incoming_call():
     }
     
     # Start with greeting using OpenAI TTS for superior voice quality
-    base_url = request.url_root.rstrip('/')
+    base_url = get_base_url()
     greeting_text = greetings.get(default_lang, greetings["en-US"])
     say_with_openai_tts(response, greeting_text, default_lang, base_url)
     
@@ -278,7 +357,7 @@ def process_speech():
                     "pt-BR": "Claro, falarei em português. Como posso ajudá-lo?",
                 }
                 current_lang = lang_code
-                base_url = request.url_root.rstrip('/')
+                base_url = get_base_url()
                 confirmation_text = lang_confirmations.get(lang_code, lang_confirmations["en-US"])
                 say_with_openai_tts(response, confirmation_text, current_lang, base_url)
                 gather = Gather(
@@ -325,7 +404,7 @@ def process_speech():
                 "pt-BR": "Claro, falarei em português. Como posso ajudá-lo?",
             }
             current_lang = lang_code
-            base_url = request.url_root.rstrip('/')
+            base_url = get_base_url()
             confirmation_text = lang_confirmations.get(lang_code, lang_confirmations["en-US"])
             say_with_openai_tts(response, confirmation_text, current_lang, base_url)
             gather = Gather(
@@ -386,7 +465,7 @@ def process_speech():
     
     # Create TwiML response with OpenAI TTS for superior voice quality
     response = VoiceResponse()
-    base_url = request.url_root.rstrip('/')
+    base_url = get_base_url()
     say_with_openai_tts(response, agent_response, current_lang, base_url)
     
     # Continue conversation with language detection
