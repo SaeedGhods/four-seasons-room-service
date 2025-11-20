@@ -124,7 +124,7 @@ def get_gcp_tts_voice(lang_code):
         "zh-CN": ("zh-CN-Neural2-C", "zh-CN"),
         "zh-TW": ("zh-TW-Neural2-C", "zh-TW"),
         "ar-SA": ("ar-XA-Wavenet-B", "ar-XA"),  # Arabic
-        "fa-IR": ("", "fa-IR"),  # Farsi - let Google pick default voice (more reliable)
+        "fa-IR": ("ar-XA-Wavenet-B", "ar-XA"),  # Farsi - use Arabic voice (closest available, works well for Farsi)
         "hi-IN": ("hi-IN-Neural2-D", "hi-IN"),
         "ru-RU": ("ru-RU-Neural2-D", "ru-RU"),
         "nl-NL": ("nl-NL-Neural2-C", "nl-NL"),
@@ -218,6 +218,13 @@ def generate_audio_with_gcp(text, lang_code, base_url):
         # Configure the synthesis input
         synthesis_input = texttospeech.SynthesisInput(text=text)
         
+        # Select the type of audio file you want returned
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=0.95,  # Slightly slower for clarity
+            pitch=0.0,
+        )
+        
         # Build the voice request - only include name if specified
         if voice_name:
             voice = texttospeech.VoiceSelectionParams(
@@ -229,13 +236,6 @@ def generate_audio_with_gcp(text, lang_code, base_url):
             voice = texttospeech.VoiceSelectionParams(
                 language_code=language_code,
             )
-        
-        # Select the type of audio file you want returned
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=0.95,  # Slightly slower for clarity
-            pitch=0.0,
-        )
         
         # Perform the text-to-speech request
         try:
