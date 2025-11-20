@@ -4,6 +4,10 @@ Handles conversations about menu items and takes orders
 """
 
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 from typing import Dict, List
 from menu_data import MENU_CATEGORIES, search_menu, get_category_items, SERVICE_CHARGE_PERCENT, DELIVERY_FEE
 import google.generativeai as genai
@@ -21,6 +25,8 @@ class RoomServiceAgent:
         
         self.conversation_history: Dict[str, List[Dict]] = {}
         self.active_orders: Dict[str, List[Dict]] = {}
+        self.room_numbers: Dict[str, str] = {}  # Store room numbers per call
+        self.awaiting_room_number: Dict[str, bool] = {}  # Track if we're waiting for room number
         
     def get_conversation_context(self, call_sid: str) -> str:
         """Get conversation history as context"""
@@ -139,14 +145,51 @@ class RoomServiceAgent:
         if any(word in message_lower for word in ["place order", "checkout", "complete", "finish", "that's all", "done", "finalize"]):
             order = self.active_orders.get(call_sid, [])
             if order:
-                # Clear order after placement
-                self.active_orders[call_sid] = []
-                print(f"Order placed and cleared for call {call_sid}")
+                # Check if we have room number
+                if call_sid not in self.room_numbers or not self.room_numbers[call_sid]:
+                    # Need to ask for room number first
+                    self.awaiting_room_number[call_sid] = True
+                    print(f"Order ready but missing room number for call {call_sid}")
+                else:
+                    # We have room number, place the order and send email
+                    self.place_order(call_sid)
+        
+        # Extract room number if user provides it
+        import re
+        # Look for room number patterns: "room 123", "room number 123", "123", etc.
+        room_patterns = [
+            r'room\s*(?:number\s*)?(\d+)',
+            r'room\s*#?\s*(\d+)',
+            r'^(\d{3,4})$',  # Just numbers (3-4 digits)
+            r'(\d{3,4})',  # Any 3-4 digit number
+        ]
+        
+        room_provided = False
+        for pattern in room_patterns:
+            match = re.search(pattern, message_lower)
+            if match:
+                room_num = match.group(1)
+                self.room_numbers[call_sid] = room_num
+                self.awaiting_room_number[call_sid] = False
+                print(f"Room number captured for call {call_sid}: {room_num}")
+                room_provided = True
+                break
+        
+        # If room number was just provided and we have an order waiting, try to place it
+        if room_provided and self.awaiting_room_number.get(call_sid, False):
+            order = self.active_orders.get(call_sid, [])
+            if order:
+                self.place_order(call_sid)
         
         # Build comprehensive context for Grok
         context = self.get_conversation_context(call_sid)
         menu_info = self.get_detailed_menu_info()
         order_info = self.get_current_order_info(call_sid)
+        
+        # Check if we're awaiting room number
+        awaiting_room = self.awaiting_room_number.get(call_sid, False)
+        has_room = call_sid in self.room_numbers and self.room_numbers[call_sid]
+        order = self.active_orders.get(call_sid, [])
         
         prompt = f"""You are Nasrin, room service concierge at Four Seasons Toronto. Be professional, helpful, and concise.
 
@@ -166,7 +209,8 @@ INSTRUCTIONS:
 - When they ask about menu: give specific items and prices quickly
 - When they order: confirm the item and price (items are auto-added)
 - When reviewing order: state items and total clearly
-- When placing order: confirm total and delivery time (30-45 minutes)
+- When placing order: {"FIRST ask for their room number before confirming the order" if awaiting_room and not has_room and order else "confirm total and delivery time (30-45 minutes)"}
+- If they provide a room number: acknowledge it warmly
 - Answer questions directly without extra fluff"""
 
         # Use Gemini for all AI responses
@@ -235,5 +279,115 @@ INSTRUCTIONS:
             import traceback
             traceback.print_exc()
             return "How can I help you with our menu today?"
+    
+    def send_order_email(self, call_sid: str) -> bool:
+        """Send order confirmation email to saeedghods@me.com"""
+        order = self.active_orders.get(call_sid, [])
+        room_number = self.room_numbers.get(call_sid, "Not provided")
+        
+        if not order:
+            print(f"No order to send for call {call_sid}")
+            return False
+        
+        try:
+            # Calculate totals
+            subtotal = sum(item['price'] * item.get('quantity', 1) for item in order)
+            service_charge = subtotal * (SERVICE_CHARGE_PERCENT / 100)
+            final_total = subtotal + service_charge + DELIVERY_FEE
+            
+            # Create email content
+            email_body = f"""
+NEW ROOM SERVICE ORDER - Four Seasons Toronto
+
+Order Details:
+{'=' * 50}
+Call ID: {call_sid}
+Room Number: {room_number}
+Order Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S EST')}
+
+Items Ordered:
+{'-' * 50}
+"""
+            for item in order:
+                quantity = item.get('quantity', 1)
+                item_total = item['price'] * quantity
+                email_body += f"{item['name']} x{quantity}\n"
+                email_body += f"  ${item['price']:.2f} each = ${item_total:.2f}\n\n"
+            
+            email_body += f"""
+Pricing Breakdown:
+{'-' * 50}
+Subtotal: ${subtotal:.2f}
+Service Charge ({SERVICE_CHARGE_PERCENT}%): ${service_charge:.2f}
+Delivery Fee: ${DELIVERY_FEE:.2f}
+{'=' * 50}
+TOTAL: ${final_total:.2f}
+
+Estimated Delivery Time: 30-45 minutes
+
+---
+This is an automated order notification from the Four Seasons Room Service Phone Agent.
+"""
+            
+            # Get email credentials from environment
+            smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+            smtp_port = int(os.getenv("SMTP_PORT", "587"))
+            email_user = os.getenv("EMAIL_USER")
+            email_password = os.getenv("EMAIL_PASSWORD")
+            recipient_email = os.getenv("ORDER_EMAIL", "saeedghods@me.com")
+            
+            if not email_user or not email_password:
+                print("Email credentials not configured. Set EMAIL_USER and EMAIL_PASSWORD environment variables.")
+                return False
+            
+            # Create message
+            msg = MIMEMultipart()
+            msg['From'] = email_user
+            msg['To'] = recipient_email
+            msg['Subject'] = f"New Room Service Order - Room {room_number} - ${final_total:.2f}"
+            
+            msg.attach(MIMEText(email_body, 'plain'))
+            
+            # Send email
+            server = smtplib.SMTP(smtp_server, smtp_port)
+            server.starttls()
+            server.login(email_user, email_password)
+            server.send_message(msg)
+            server.quit()
+            
+            print(f"Order email sent successfully for call {call_sid} to {recipient_email}")
+            return True
+            
+        except Exception as e:
+            print(f"Error sending order email: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def place_order(self, call_sid: str) -> bool:
+        """Place order and send email notification"""
+        order = self.active_orders.get(call_sid, [])
+        room_number = self.room_numbers.get(call_sid)
+        
+        if not order:
+            print(f"No order to place for call {call_sid}")
+            return False
+        
+        if not room_number:
+            print(f"Cannot place order without room number for call {call_sid}")
+            return False
+        
+        # Send email
+        email_sent = self.send_order_email(call_sid)
+        
+        if email_sent:
+            # Clear order after successful email
+            self.active_orders[call_sid] = []
+            self.awaiting_room_number[call_sid] = False
+            print(f"Order placed and cleared for call {call_sid}")
+            return True
+        else:
+            print(f"Order email failed for call {call_sid}, order not cleared")
+            return False
 
 
