@@ -80,18 +80,18 @@ def handle_incoming_call():
     
     # Initial greeting in multiple languages
     greetings = {
-        "en-US": "Hello! Welcome to Four Seasons Toronto room service. I'm your virtual assistant, and I'm here to help you with our menu and take your order. Please speak naturally in any language, and I'll assist you. How can I help you today?",
-        "es-ES": "¡Hola! Bienvenido al servicio de habitaciones de Four Seasons Toronto. Soy su asistente virtual y estoy aquí para ayudarle con nuestro menú y tomar su pedido. Por favor, hable con naturalidad en cualquier idioma y le ayudaré. ¿Cómo puedo ayudarle hoy?",
-        "fr-FR": "Bonjour! Bienvenue au service en chambre du Four Seasons Toronto. Je suis votre assistant virtuel et je suis là pour vous aider avec notre menu et prendre votre commande. Veuillez parler naturellement dans n'importe quelle langue et je vous aiderai. Comment puis-je vous aider aujourd'hui?",
-        "de-DE": "Hallo! Willkommen beim Roomservice des Four Seasons Toronto. Ich bin Ihr virtueller Assistent und helfe Ihnen gerne mit unserer Speisekarte und nehme Ihre Bestellung auf. Bitte sprechen Sie natürlich in jeder Sprache und ich werde Ihnen helfen. Wie kann ich Ihnen heute helfen?",
-        "it-IT": "Ciao! Benvenuto al servizio in camera del Four Seasons Toronto. Sono il tuo assistente virtuale e sono qui per aiutarti con il nostro menu e prendere il tuo ordine. Per favore parla naturalmente in qualsiasi lingua e ti aiuterò. Come posso aiutarti oggi?",
-        "ja-JP": "こんにちは！フォーシーズンズトロントのルームサービスへようこそ。私はあなたのバーチャルアシスタントで、メニューについてお手伝いし、ご注文をお受けします。どの言語でも自然に話してください。今日はどのようにお手伝いできますか？",
-        "zh-CN": "您好！欢迎来到多伦多四季酒店客房服务。我是您的虚拟助手，在这里帮助您了解我们的菜单并接受您的订单。请用任何语言自然地说，我会帮助您。今天我能为您做些什么？",
-        "ar-SA": "مرحباً! أهلاً بك في خدمة الغرف في فور سيزونز تورونتو. أنا مساعدك الافتراضي وأنا هنا لمساعدتك في قائمة الطعام وأخذ طلبك. يرجى التحدث بشكل طبيعي بأي لغة وسأساعدك. كيف يمكنني مساعدتك اليوم؟",
-        "fa-IR": "سلام! به سرویس اتاق هتل فور سیزونز تورنتو خوش آمدید. من دستیار مجازی شما هستم و اینجا هستم تا به شما در مورد منوی ما کمک کنم و سفارش شما را بگیرم. لطفاً به هر زبانی که راحت هستید صحبت کنید و من به شما کمک خواهم کرد. امروز چطور می‌توانم به شما کمک کنم؟",
-        "hi-IN": "नमस्ते! फोर सीज़न्स टोरंटो रूम सर्विस में आपका स्वागत है। मैं आपका वर्चुअल असिस्टेंट हूं और मैं यहां आपकी मेनू के साथ मदद करने और आपका ऑर्डर लेने के लिए हूं। कृपया किसी भी भाषा में स्वाभाविक रूप से बोलें और मैं आपकी मदद करूंगा। आज मैं आपकी कैसे मदद कर सकता हूं?",
-        "ru-RU": "Здравствуйте! Добро пожаловать в службу номеров Four Seasons Toronto. Я ваш виртуальный помощник и здесь, чтобы помочь вам с нашим меню и принять ваш заказ. Пожалуйста, говорите естественно на любом языке, и я помогу вам. Чем я могу вам помочь сегодня?",
-        "pt-BR": "Olá! Bem-vindo ao serviço de quarto do Four Seasons Toronto. Sou seu assistente virtual e estou aqui para ajudá-lo com nosso cardápio e fazer seu pedido. Por favor, fale naturalmente em qualquer idioma e eu o ajudarei. Como posso ajudá-lo hoje?",
+        "en-US": "Greetings from the Four Seasons. This is Nasrin, your dedicated room service concierge. How may I elevate your experience with a delightful dining moment today?",
+        "es-ES": "Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
+        "fr-FR": "Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
+        "de-DE": "Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
+        "it-IT": "Saluti dal Four Seasons. Sono Nasrin, la vostra concierge dedicata al servizio in camera. Come posso elevare la vostra esperienza con un delizioso momento gastronomico oggi?",
+        "ja-JP": "フォーシーズンズよりご挨拶申し上げます。ルームサービスの専属コンシェルジュ、ナスリンでございます。本日、素晴らしい食事のひとときでお客様の体験をより豊かにするには、どのようにお手伝いできるでしょうか？",
+        "zh-CN": "来自四季酒店的问候。我是纳斯林，您专属的客房服务礼宾。今天，我如何通过美妙的用餐时刻来提升您的体验？",
+        "ar-SA": "تحيات من فور سيزونز. أنا نسرين، كونسيرج خدمة الغرف المخصصة لك. كيف يمكنني رفع تجربتك مع لحظة طعام لذيذة اليوم؟",
+        "fa-IR": "درود از فور سیزونز. من نسرین هستم، کونسیرژ اختصاصی سرویس اتاق شما. امروز چگونه می‌توانم تجربه شما را با یک لحظه لذیذ غذایی ارتقا دهم؟",
+        "hi-IN": "फोर सीज़न्स से अभिवादन। मैं नसरीन हूं, आपकी समर्पित रूम सर्विस कॉन्सिएर्ज। आज मैं एक स्वादिष्ट भोजन के क्षण के साथ आपके अनुभव को कैसे बढ़ा सकती हूं?",
+        "ru-RU": "Приветствие от Four Seasons. Я Насрин, ваш персональный консьерж службы номеров. Как я могу улучшить ваше впечатление сегодня с помощью восхитительного кулинарного момента?",
+        "pt-BR": "Saudações do Four Seasons. Sou Nasrin, sua concierge dedicada de serviço de quarto. Como posso elevar sua experiência com um momento gastronômico delicioso hoje?",
     }
     
     # Start with English greeting, but support all languages
