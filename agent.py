@@ -123,11 +123,15 @@ class RoomServiceAgent:
         # Handle order actions (add/remove items) before AI call
         message_lower = user_message.lower()
         
-        # Check if user wants to add item to order
-        if any(word in message_lower for word in ["i want", "i'd like", "add", "get me", "order", "i'll take"]):
+        # Check if user wants to add item to order - expanded detection
+        order_intent_keywords = ["i want", "i'd like", "add", "get me", "order", "i'll take", "i'll have", 
+                                "can i get", "can i have", "give me", "i need", "bring me"]
+        
+        if any(word in message_lower for word in order_intent_keywords):
             # Try to find menu item
             search_terms = user_message
-            for word in ["order", "i'll take", "i want", "i'd like", "add", "get me", "please", "can i have"]:
+            for word in ["order", "i'll take", "i'll have", "i want", "i'd like", "add", "get me", "please", 
+                        "can i have", "can i get", "give me", "i need", "bring me", "a", "an", "the"]:
                 search_terms = search_terms.replace(word, "").strip()
             
             if search_terms:
@@ -141,18 +145,30 @@ class RoomServiceAgent:
                         "quantity": 1
                     }
                     self.active_orders[call_sid].append(order_item)
-                    print(f"Added {item['name']} to order for call {call_sid}")
+                    print(f"[ORDER] ✅ Added {item['name']} to order for call {call_sid}. Order now has {len(self.active_orders[call_sid])} items.")
+                else:
+                    print(f"[ORDER] ⚠️ Could not find menu item matching: {search_terms}")
         
         # Check if user wants to place/complete order - expanded keywords
-        order_keywords = ["place order", "checkout", "complete", "finish", "that's all", "that's it", 
-                         "that is all", "that is it", "done", "finalize", "ready", "i'm done", 
-                         "im done", "all set", "goodbye", "bye", "thank you", "thanks"]
+        # Separate positive completion from negative responses
+        positive_completion = ["place order", "checkout", "complete", "finish", "that's all", "that's it", 
+                              "that is all", "that is it", "done", "finalize", "ready", "i'm done", 
+                              "im done", "all set", "goodbye", "bye"]
         
-        wants_to_complete = any(word in message_lower for word in order_keywords)
+        # Negative responses that indicate they're done (when asked "anything else?")
+        negative_completion = ["no thank you", "no thanks", "no, thank you", "no, thanks", 
+                              "that's all", "nothing else", "no more", "no that's it"]
+        
         order = self.active_orders.get(call_sid, [])
         
-        # If user has items and wants to complete, or says goodbye with items, place order
-        if wants_to_complete and order:
+        # Check for positive completion
+        wants_to_complete = any(word in message_lower for word in positive_completion)
+        
+        # Check for negative completion (only if we have items and they're responding to "anything else?")
+        is_negative_completion = any(phrase in message_lower for phrase in negative_completion) and order
+        
+        # If user has items and wants to complete (positive or negative), place order
+        if (wants_to_complete or is_negative_completion) and order:
             print(f"[ORDER] User wants to complete order. Items: {len(order)}, Room: {self.room_numbers.get(call_sid, 'NOT SET')}")
             # Check if we have room number
             if call_sid not in self.room_numbers or not self.room_numbers[call_sid]:
@@ -216,6 +232,10 @@ class RoomServiceAgent:
                 order_status = f"The customer has provided room number {self.room_numbers[call_sid]}. If they confirm they're done or say goodbye, the order will be placed automatically."
             elif self.order_complete.get(call_sid, False):
                 order_status = "The order has already been placed. Thank the customer and wish them a pleasant stay."
+            elif not has_room:
+                # We have items but no room number - if they say no/decline, ask for room number
+                if is_negative_completion or (message_lower in ["no", "no thank you", "no thanks", "no, thank you", "no, thanks"]):
+                    order_status = "CRITICAL: The customer has items in their order and just declined further items. You MUST ask for their room number NOW to complete the order. Say 'May I have your room number, please?'"
         
         prompt = f"""You are Nasrin, a warm and professional room service concierge at Four Seasons Hotel Toronto. You're speaking on the phone, so be natural, conversational, and concise.
 
