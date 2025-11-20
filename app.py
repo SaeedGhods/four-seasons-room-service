@@ -63,8 +63,8 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_
 @app.route("/", methods=["GET"])
 def health_check():
     """Health check endpoint"""
-    version = get_version_timestamp()
-    return f"Four Seasons Room Service Agent is running! Version: {version}", 200
+    edit_time = get_version_timestamp()
+    return f"Four Seasons Room Service Agent is running! Last updated: {edit_time}", 200
 
 
 def get_voice_for_language(lang_code):
@@ -165,16 +165,44 @@ def cleanup_old_audio():
         print(f"Error in cleanup: {e}")
 
 def get_version_timestamp():
-    """Get current timestamp in Eastern Time formatted as YY-MM-DD-HHMM"""
+    """Get last code edit time formatted as '2:57 PM'"""
     try:
-        et = pytz.timezone('US/Eastern')
-        now_et = datetime.now(et)
-        # Format: YY-MM-DD-HHMM (e.g., 25-11-20-1430)
-        version = now_et.strftime("%y-%m-%d-%H%M")
-        return version
+        import os
+        # Get the modification time of agent.py (main code file)
+        agent_file = os.path.join(os.path.dirname(__file__), 'agent.py')
+        if os.path.exists(agent_file):
+            mtime = os.path.getmtime(agent_file)
+            edit_time = datetime.fromtimestamp(mtime)
+        else:
+            # Fallback to current time if file not found
+            edit_time = datetime.now()
+        
+        # Convert to Eastern Time
+        et_tz = pytz.timezone('America/New_York')
+        if edit_time.tzinfo is None:
+            # If naive datetime, assume it's UTC and convert
+            edit_time = pytz.utc.localize(edit_time)
+        edit_time_et = edit_time.astimezone(et_tz)
+        
+        # Format as "2:57 PM" (12-hour format)
+        # Use %I for 12-hour format, %p for AM/PM
+        time_str = edit_time_et.strftime("%I:%M %p")
+        # Remove leading zero from hour if present
+        if time_str.startswith('0'):
+            time_str = time_str[1:]
+        # Make PM/AM lowercase
+        time_str = time_str.replace(' AM', ' am').replace(' PM', ' pm')
+        return time_str
     except Exception as e:
         print(f"Error getting version timestamp: {e}")
-        # Fallback to UTC if ET fails
+        # Fallback to current time
+        try:
+            et_tz = pytz.timezone('America/New_York')
+            now_et = datetime.now(et_tz)
+            time_str = now_et.strftime("%I:%M %p").lstrip('0').replace(' AM', ' am').replace(' PM', ' pm')
+            return time_str
+        except:
+            return "unknown"
         return datetime.utcnow().strftime("%y-%m-%d-%H%M")
 
 def get_base_url():
@@ -373,18 +401,18 @@ def handle_incoming_call():
     
     # Initial greeting in multiple languages with version info
     greetings = {
-        "en-US": f"Hello, this is Nasrin from Four Seasons room service. Version {version}. I speak multiple languages—say the language name to switch. How can I help you today?",
-        "es-ES": f"Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. Esta es la versión {version}. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
-        "fr-FR": f"Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Ceci est la version {version}. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
-        "de-DE": f"Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Dies ist Version {version}. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
-        "it-IT": f"Saluti dal Four Seasons. Sono Nasrin, la vostra concierge dedicata al servizio in camera. Questa è la versione {version}. Come posso elevare la vostra esperienza con un delizioso momento gastronomico oggi?",
-        "ja-JP": f"フォーシーズンズよりご挨拶申し上げます。ルームサービスの専属コンシェルジュ、ナスリンでございます。これはバージョン{version}です。本日、素晴らしい食事のひとときでお客様の体験をより豊かにするには、どのようにお手伝いできるでしょうか？",
-        "zh-CN": f"来自四季酒店的问候。我是纳斯林，您专属的客房服务礼宾。这是版本{version}。今天，我如何通过美妙的用餐时刻来提升您的体验？",
-        "ar-SA": f"تحيات من فور سيزونز. أنا نسرين، كونسيرج خدمة الغرف المخصصة لك. هذه هي النسخة {version}. كيف يمكنني رفع تجربتك مع لحظة طعام لذيذة اليوم؟",
-        "fa-IR": f"درود از فور سیزونز. من نسرین هستم، کونسیرژ اختصاصی سرویس اتاق شما. این نسخه {version} است. امروز چگونه می‌توانم تجربه شما را با یک لحظه لذیذ غذایی ارتقا دهم؟",
-        "hi-IN": f"फोर सीज़न्स से अभिवादन। मैं नसरीन हूं, आपकी समर्पित रूम सर्विस कॉन्सिएर्ज। यह संस्करण {version} है। आज मैं एक स्वादिष्ट भोजन के क्षण के साथ आपके अनुभव को कैसे बढ़ा सकती हूं?",
-        "ru-RU": f"Приветствие от Four Seasons. Я Насрин, ваш персональный консьерж службы номеров. Это версия {version}. Как я могу улучшить ваше впечатление сегодня с помощью восхитительного кулинарного момента?",
-        "pt-BR": f"Saudações do Four Seasons. Sou Nasrin, sua concierge dedicada de serviço de quarto. Esta é a versão {version}. Como posso elevar sua experiência com um momento gastronômico delicioso hoje?",
+        "en-US": f"Hello, this is Nasrin from Four Seasons room service. Last updated at {version}. I speak multiple languages—say the language name to switch. How can I help you today?",
+        "es-ES": f"Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. Actualizado a las {version}. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
+        "fr-FR": f"Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Mis à jour à {version}. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
+        "de-DE": f"Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Aktualisiert um {version}. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
+        "it-IT": f"Saluti dal Four Seasons. Sono Nasrin, la vostra concierge dedicata al servizio in camera. Aggiornato alle {version}. Come posso elevare la vostra esperienza con un delizioso momento gastronomico oggi?",
+        "ja-JP": f"フォーシーズンズよりご挨拶申し上げます。ルームサービスの専属コンシェルジュ、ナスリンでございます。{version}に更新されました。本日、素晴らしい食事のひとときでお客様の体験をより豊かにするには、どのようにお手伝いできるでしょうか？",
+        "zh-CN": f"来自四季酒店的问候。我是纳斯林，您专属的客房服务礼宾。更新于{version}。今天，我如何通过美妙的用餐时刻来提升您的体验？",
+        "ar-SA": f"تحيات من فور سيزونز. أنا نسرين، كونسيرج خدمة الغرف المخصصة لك. تم التحديث في {version}. كيف يمكنني رفع تجربتك مع لحظة طعام لذيذة اليوم؟",
+        "fa-IR": f"درود از فور سیزونز. من نسرین هستم، کونسیرژ اختصاصی سرویس اتاق شما. به‌روزرسانی شده در {version}. امروز چگونه می‌توانم تجربه شما را با یک لحظه لذیذ غذایی ارتقا دهم؟",
+        "hi-IN": f"फोर सीज़न्स से अभिवादन। मैं नसरीन हूं, आपकी समर्पित रूम सर्विस कॉन्सिएर्ज। {version} पर अपडेट किया गया। आज मैं एक स्वादिष्ट भोजन के क्षण के साथ आपके अनुभव को कैसे बढ़ा सकती हूं?",
+        "ru-RU": f"Приветствие от Four Seasons. Я Насрин, ваш персональный консьерж службы номеров. Обновлено в {version}. Как я могу улучшить ваше впечатление сегодня с помощью восхитительного кулинарного момента?",
+        "pt-BR": f"Saudações do Four Seasons. Sou Nasrin, sua concierge dedicada de serviço de quarto. Atualizado às {version}. Como posso elevar sua experiência com um momento gastronômico delicioso hoje?",
     }
     
     # Start with greeting using OpenAI TTS for superior voice quality
