@@ -155,6 +155,7 @@ def get_base_url():
 def generate_audio_with_openai(text, lang_code, base_url):
     """Generate high-quality audio using OpenAI TTS with caching and cleanup"""
     if not openai_client:
+        print("OpenAI client not available for TTS")
         return None
     
     try:
@@ -168,8 +169,10 @@ def generate_audio_with_openai(text, lang_code, base_url):
             if cached_id in audio_cache:
                 # Update access time
                 audio_cache[cached_id]["created"] = datetime.now()
+                print(f"Using cached audio for text hash: {text_hash[:8]}...")
                 return cached_id
         
+        print(f"Generating new audio for language {lang_code}, text length: {len(text)}")
         voice = get_openai_tts_voice(lang_code)
         
         # Use HD model for superior quality
@@ -186,6 +189,15 @@ def generate_audio_with_openai(text, lang_code, base_url):
         temp_file.write(response.content)
         temp_file.close()
         
+        file_size = os.path.getsize(temp_file.name)
+        print(f"Generated audio file: {audio_id}, size: {file_size} bytes, path: {temp_file.name}")
+        
+        # Verify file is not empty
+        if file_size == 0:
+            print(f"ERROR: Generated audio file is empty for {audio_id}")
+            os.remove(temp_file.name)
+            return None
+        
         # Store in cache with metadata
         audio_cache[audio_id] = {
             "path": temp_file.name,
@@ -200,40 +212,61 @@ def generate_audio_with_openai(text, lang_code, base_url):
         return audio_id
     except Exception as e:
         print(f"Error generating OpenAI TTS audio: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 @app.route("/audio/<audio_id>")
 def serve_audio(audio_id):
     """Serve generated audio file with proper headers"""
+    print(f"Audio request received for ID: {audio_id}")
     if audio_id in audio_cache:
         metadata = audio_cache[audio_id]
         file_path = metadata.get("path") if isinstance(metadata, dict) else metadata
         if file_path and os.path.exists(file_path):
+            file_size = os.path.getsize(file_path)
+            print(f"Serving audio file: {audio_id}, size: {file_size} bytes")
+            if file_size == 0:
+                print(f"ERROR: Audio file is empty: {audio_id}")
+                return "Audio file is empty", 500
             response = send_file(file_path, mimetype='audio/mpeg')
             # Add cache headers for better performance
             response.headers['Cache-Control'] = 'public, max-age=3600'
             response.headers['Content-Type'] = 'audio/mpeg'
+            response.headers['Content-Length'] = str(file_size)
             return response
+        else:
+            print(f"Audio file not found on disk: {file_path}")
+    else:
+        print(f"Audio ID not in cache: {audio_id}, cache size: {len(audio_cache)}")
     return "Audio not found", 404
 
 def say_with_openai_tts(response, text, lang_code, base_url):
     """Use OpenAI TTS instead of Twilio's built-in TTS for superior voice quality"""
     if not text or not text.strip():
+        print("Empty text provided to TTS")
         return False
         
     if openai_client:
         try:
+            print(f"Attempting OpenAI TTS for language {lang_code}, text preview: {text[:50]}...")
             audio_id = generate_audio_with_openai(text, lang_code, base_url)
             if audio_id:
                 # Use absolute URL for reliable playback
                 audio_url = f"{base_url}/audio/{audio_id}"
+                print(f"Successfully generated audio, URL: {audio_url}")
                 response.play(audio_url)
                 return True
+            else:
+                print("OpenAI TTS returned None, falling back to Twilio")
         except Exception as e:
-            print(f"OpenAI TTS failed, falling back to Twilio: {e}")
+            print(f"OpenAI TTS failed with exception, falling back to Twilio: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Fallback to Twilio's Say if OpenAI TTS fails
     try:
+        print(f"Using Twilio TTS fallback for language {lang_code}")
         voice = get_voice_for_language(lang_code)
         twilio_lang = get_twilio_language_code(lang_code)
         response.say(text, voice=voice, language=twilio_lang)
