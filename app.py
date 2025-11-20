@@ -3,12 +3,15 @@ Flask application for Four Seasons Room Service Phone Agent
 Handles Twilio webhooks for incoming calls
 """
 
-from flask import Flask, request
-from twilio.twiml.voice_response import VoiceResponse, Gather
+from flask import Flask, request, send_file
+from twilio.twiml.voice_response import VoiceResponse, Gather, Play
 from twilio.rest import Client
 import os
+import tempfile
+import uuid
 from dotenv import load_dotenv
 from agent import RoomServiceAgent
+from openai import OpenAI
 
 load_dotenv()
 
@@ -17,6 +20,15 @@ agent = RoomServiceAgent()
 
 # Store detected language per call
 call_languages = {}
+
+# OpenAI client for TTS
+openai_client = None
+openai_key = os.getenv("OPENAI_API_KEY")
+if openai_key and openai_key != "your_openai_api_key":
+    openai_client = OpenAI(api_key=openai_key)
+
+# Store generated audio files temporarily (in production, use a proper storage solution)
+audio_cache = {}
 
 # Twilio credentials
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -45,7 +57,7 @@ def get_voice_for_language(lang_code):
         "ko-KR": "Seoyeon",
         "zh-CN": "Zhiyu", "zh-TW": "Zhiyu",
         "ar-SA": "Zeina", "ar-EG": "Zeina",
-        "fa-IR": "Zira",  # Farsi/Persian
+        "fa-IR": "Zeina",  # Farsi/Persian - use Arabic voice (closest available)
         "hi-IN": "Aditi",
         "ru-RU": "Tatyana",
         "nl-NL": "Lotte",
@@ -63,6 +75,95 @@ def get_voice_for_language(lang_code):
     }
     # Default to alice for English if language not found
     return voice_map.get(lang_code, "alice")
+
+def get_openai_tts_voice(lang_code):
+    """Get OpenAI TTS voice for language - OpenAI has excellent multilingual support"""
+    # OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer
+    # These voices work well across multiple languages
+    voice_map = {
+        "en-US": "nova",  # Warm, natural English
+        "es-ES": "shimmer", "es-MX": "shimmer", "es-US": "shimmer",
+        "fr-FR": "alloy", "fr-CA": "alloy",
+        "de-DE": "onyx",
+        "it-IT": "echo",
+        "pt-BR": "fable", "pt-PT": "fable",
+        "ja-JP": "nova",
+        "ko-KR": "shimmer",
+        "zh-CN": "alloy", "zh-TW": "alloy",
+        "ar-SA": "onyx", "ar-EG": "onyx",
+        "fa-IR": "alloy",  # OpenAI TTS handles Farsi well!
+        "hi-IN": "shimmer",
+        "ru-RU": "onyx",
+        "nl-NL": "echo",
+        "pl-PL": "fable",
+        "tr-TR": "alloy",
+        "sv-SE": "nova",
+        "da-DK": "echo",
+        "no-NO": "fable",
+        "fi-FI": "shimmer",
+        "cs-CZ": "onyx",
+        "hu-HU": "echo",
+        "ro-RO": "fable",
+        "th-TH": "alloy",
+        "vi-VN": "shimmer"
+    }
+    return voice_map.get(lang_code, "nova")  # Default to nova
+
+def generate_audio_with_openai(text, lang_code):
+    """Generate audio using OpenAI TTS and return the file path"""
+    if not openai_client:
+        return None
+    
+    try:
+        voice = get_openai_tts_voice(lang_code)
+        
+        # Generate audio
+        response = openai_client.audio.speech.create(
+            model="tts-1",  # or "tts-1-hd" for higher quality
+            voice=voice,
+            input=text,
+            speed=1.0
+        )
+        
+        # Save to temporary file
+        audio_id = str(uuid.uuid4())
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        temp_file.write(response.content)
+        temp_file.close()
+        
+        # Store in cache with public URL reference
+        audio_cache[audio_id] = temp_file.name
+        
+        # Return the audio ID (we'll serve it via Flask endpoint)
+        return audio_id
+    except Exception as e:
+        print(f"Error generating OpenAI TTS audio: {e}")
+        return None
+
+@app.route("/audio/<audio_id>")
+def serve_audio(audio_id):
+    """Serve generated audio file"""
+    if audio_id in audio_cache:
+        file_path = audio_cache[audio_id]
+        if os.path.exists(file_path):
+            return send_file(file_path, mimetype='audio/mpeg')
+    return "Audio not found", 404
+
+def say_with_openai_tts(response, text, lang_code, base_url):
+    """Use OpenAI TTS instead of Twilio's built-in TTS for superior voice quality"""
+    if openai_client:
+        audio_id = generate_audio_with_openai(text, lang_code)
+        if audio_id:
+            # Use Play to play the OpenAI-generated audio
+            audio_url = f"{base_url}/audio/{audio_id}"
+            response.play(audio_url)
+            return True
+    
+    # Fallback to Twilio's Say if OpenAI TTS fails
+    voice = get_voice_for_language(lang_code)
+    twilio_lang = get_twilio_language_code(lang_code)
+    response.say(text, voice=voice, language=twilio_lang)
+    return False
 
 @app.route("/voice", methods=["POST"])
 def handle_incoming_call():
@@ -94,12 +195,10 @@ def handle_incoming_call():
         "pt-BR": "Saudações do Four Seasons. Sou Nasrin, sua concierge dedicada de serviço de quarto. Como posso elevar sua experiência com um momento gastronômico delicioso hoje?",
     }
     
-    # Start with English greeting, but support all languages
-    response.say(
-        greetings.get(default_lang, greetings["en-US"]),
-        voice=get_voice_for_language(default_lang),
-        language=default_lang
-    )
+    # Start with greeting using OpenAI TTS for superior voice quality
+    base_url = request.url_root.rstrip('/')
+    greeting_text = greetings.get(default_lang, greetings["en-US"])
+    say_with_openai_tts(response, greeting_text, default_lang, base_url)
     
     # Gather user input - support multiple languages
     # Twilio will auto-detect language, but we can specify multiple
@@ -179,12 +278,9 @@ def process_speech():
                     "pt-BR": "Claro, falarei em português. Como posso ajudá-lo?",
                 }
                 current_lang = lang_code
-                voice = get_voice_for_language(current_lang)
-                response.say(
-                    lang_confirmations.get(lang_code, lang_confirmations["en-US"]),
-                    voice=voice,
-                    language=current_lang
-                )
+                base_url = request.url_root.rstrip('/')
+                confirmation_text = lang_confirmations.get(lang_code, lang_confirmations["en-US"])
+                say_with_openai_tts(response, confirmation_text, current_lang, base_url)
                 gather = Gather(
                     input="speech",
                     action="/process-speech",
@@ -229,12 +325,9 @@ def process_speech():
                 "pt-BR": "Claro, falarei em português. Como posso ajudá-lo?",
             }
             current_lang = lang_code
-            voice = get_voice_for_language(current_lang)
-            response.say(
-                lang_confirmations.get(lang_code, lang_confirmations["en-US"]),
-                voice=voice,
-                language=current_lang
-            )
+            base_url = request.url_root.rstrip('/')
+            confirmation_text = lang_confirmations.get(lang_code, lang_confirmations["en-US"])
+            say_with_openai_tts(response, confirmation_text, current_lang, base_url)
             gather = Gather(
                 input="speech",
                 action="/process-speech",
@@ -291,9 +384,10 @@ def process_speech():
     # Process with agent (Grok will respond in the detected language)
     agent_response = agent.process_message(call_sid, speech_result)
     
-    # Create TwiML response with appropriate voice
+    # Create TwiML response with OpenAI TTS for superior voice quality
     response = VoiceResponse()
-    response.say(agent_response, voice=voice, language=current_lang)
+    base_url = request.url_root.rstrip('/')
+    say_with_openai_tts(response, agent_response, current_lang, base_url)
     
     # Continue conversation with language detection
     gather = Gather(
