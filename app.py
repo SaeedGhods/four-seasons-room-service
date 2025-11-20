@@ -12,6 +12,7 @@ import uuid
 import time
 import threading
 from datetime import datetime, timedelta
+import pytz
 from dotenv import load_dotenv
 from agent import RoomServiceAgent
 from openai import OpenAI
@@ -136,6 +137,19 @@ def cleanup_old_audio():
                 del response_cache[metadata["text_hash"]]
     except Exception as e:
         print(f"Error in cleanup: {e}")
+
+def get_version_timestamp():
+    """Get current timestamp in Eastern Time formatted as YY-MM-DD-HHMM"""
+    try:
+        et = pytz.timezone('US/Eastern')
+        now_et = datetime.now(et)
+        # Format: YY-MM-DD-HHMM (e.g., 25-11-20-1430)
+        version = now_et.strftime("%y-%m-%d-%H%M")
+        return version
+    except Exception as e:
+        print(f"Error getting version timestamp: {e}")
+        # Fallback to UTC if ET fails
+        return datetime.utcnow().strftime("%y-%m-%d-%H%M")
 
 def get_base_url():
     """Get the base URL for the service - prefer environment variable, fallback to request"""
@@ -291,20 +305,23 @@ def handle_incoming_call():
     
     response = VoiceResponse()
     
-    # Initial greeting in multiple languages
+    # Get version timestamp for this call
+    version = get_version_timestamp()
+    
+    # Initial greeting in multiple languages with version info
     greetings = {
-        "en-US": "Greetings from the Four Seasons. This is Nasrin, your dedicated room service concierge. I speak multiple languages including Farsi, Persian, and many others. Simply say the language name to switch. How may I elevate your experience with a delightful dining moment today?",
-        "es-ES": "Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
-        "fr-FR": "Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
-        "de-DE": "Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
-        "it-IT": "Saluti dal Four Seasons. Sono Nasrin, la vostra concierge dedicata al servizio in camera. Come posso elevare la vostra esperienza con un delizioso momento gastronomico oggi?",
-        "ja-JP": "フォーシーズンズよりご挨拶申し上げます。ルームサービスの専属コンシェルジュ、ナスリンでございます。本日、素晴らしい食事のひとときでお客様の体験をより豊かにするには、どのようにお手伝いできるでしょうか？",
-        "zh-CN": "来自四季酒店的问候。我是纳斯林，您专属的客房服务礼宾。今天，我如何通过美妙的用餐时刻来提升您的体验？",
-        "ar-SA": "تحيات من فور سيزونز. أنا نسرين، كونسيرج خدمة الغرف المخصصة لك. كيف يمكنني رفع تجربتك مع لحظة طعام لذيذة اليوم؟",
-        "fa-IR": "درود از فور سیزونز. من نسرین هستم، کونسیرژ اختصاصی سرویس اتاق شما. امروز چگونه می‌توانم تجربه شما را با یک لحظه لذیذ غذایی ارتقا دهم؟",
-        "hi-IN": "फोर सीज़न्स से अभिवादन। मैं नसरीन हूं, आपकी समर्पित रूम सर्विस कॉन्सिएर्ज। आज मैं एक स्वादिष्ट भोजन के क्षण के साथ आपके अनुभव को कैसे बढ़ा सकती हूं?",
-        "ru-RU": "Приветствие от Four Seasons. Я Насрин, ваш персональный консьерж службы номеров. Как я могу улучшить ваше впечатление сегодня с помощью восхитительного кулинарного момента?",
-        "pt-BR": "Saudações do Four Seasons. Sou Nasrin, sua concierge dedicada de serviço de quarto. Como posso elevar sua experiência com um momento gastronômico delicioso hoje?",
+        "en-US": f"Greetings from the Four Seasons. This is Nasrin, your dedicated room service concierge. This is version {version}. I speak multiple languages including Farsi, Persian, and many others. Simply say the language name to switch. How may I elevate your experience with a delightful dining moment today?",
+        "es-ES": f"Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. Esta es la versión {version}. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
+        "fr-FR": f"Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Ceci est la version {version}. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
+        "de-DE": f"Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Dies ist Version {version}. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
+        "it-IT": f"Saluti dal Four Seasons. Sono Nasrin, la vostra concierge dedicata al servizio in camera. Questa è la versione {version}. Come posso elevare la vostra esperienza con un delizioso momento gastronomico oggi?",
+        "ja-JP": f"フォーシーズンズよりご挨拶申し上げます。ルームサービスの専属コンシェルジュ、ナスリンでございます。これはバージョン{version}です。本日、素晴らしい食事のひとときでお客様の体験をより豊かにするには、どのようにお手伝いできるでしょうか？",
+        "zh-CN": f"来自四季酒店的问候。我是纳斯林，您专属的客房服务礼宾。这是版本{version}。今天，我如何通过美妙的用餐时刻来提升您的体验？",
+        "ar-SA": f"تحيات من فور سيزونز. أنا نسرين، كونسيرج خدمة الغرف المخصصة لك. هذه هي النسخة {version}. كيف يمكنني رفع تجربتك مع لحظة طعام لذيذة اليوم؟",
+        "fa-IR": f"درود از فور سیزونز. من نسرین هستم، کونسیرژ اختصاصی سرویس اتاق شما. این نسخه {version} است. امروز چگونه می‌توانم تجربه شما را با یک لحظه لذیذ غذایی ارتقا دهم؟",
+        "hi-IN": f"फोर सीज़न्स से अभिवादन। मैं नसरीन हूं, आपकी समर्पित रूम सर्विस कॉन्सिएर्ज। यह संस्करण {version} है। आज मैं एक स्वादिष्ट भोजन के क्षण के साथ आपके अनुभव को कैसे बढ़ा सकती हूं?",
+        "ru-RU": f"Приветствие от Four Seasons. Я Насрин, ваш персональный консьерж службы номеров. Это версия {version}. Как я могу улучшить ваше впечатление сегодня с помощью восхитительного кулинарного момента?",
+        "pt-BR": f"Saudações do Four Seasons. Sou Nasrin, sua concierge dedicada de serviço de quarto. Esta é a versão {version}. Como posso elevar sua experiência com um momento gastronômico delicioso hoje?",
     }
     
     # Start with greeting using OpenAI TTS for superior voice quality
