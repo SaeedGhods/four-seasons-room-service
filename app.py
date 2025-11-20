@@ -80,7 +80,7 @@ def handle_incoming_call():
     
     # Initial greeting in multiple languages
     greetings = {
-        "en-US": "Greetings from the Four Seasons. This is Nasrin, your dedicated room service concierge. How may I elevate your experience with a delightful dining moment today?",
+        "en-US": "Greetings from the Four Seasons. This is Nasrin, your dedicated room service concierge. I speak multiple languages including Farsi, Persian, and many others. Simply say the language name to switch. How may I elevate your experience with a delightful dining moment today?",
         "es-ES": "Saludos desde Four Seasons. Soy Nasrin, su conserje dedicada de servicio a la habitación. ¿Cómo puedo elevar su experiencia con un momento gastronómico delicioso hoy?",
         "fr-FR": "Salutations du Four Seasons. Je suis Nasrin, votre concierge dédiée au service en chambre. Comment puis-je rehausser votre expérience avec un moment de dégustation délicieux aujourd'hui?",
         "de-DE": "Grüße vom Four Seasons. Ich bin Nasrin, Ihre persönliche Concierge für den Zimmerservice. Wie kann ich Ihr Erlebnis heute mit einem köstlichen kulinarischen Moment bereichern?",
@@ -109,7 +109,7 @@ def handle_incoming_call():
         method="POST",
         speech_timeout="auto",
         language="auto",  # Auto-detect language
-        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, menú, orden, precio, menù, ordine, prezzo, メニュー, 注文, 価格, 菜单, 订单, 价格, قائمة, طلب, سعر, منو, سفارش, قیمت"
+        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, menú, orden, precio, menù, ordine, prezzo, メニュー, 注文, 価格, 菜单, 订单, 价格, قائمة, طلب, سعر, منو, سفارش, قیمت, فهرست, غذا, نوشیدنی, صبحانه, ناهار, شام, پیش غذا, دسر, نوشابه, آب, چای, قهوه"
     )
     response.append(gather)
     
@@ -133,11 +133,69 @@ def process_speech():
     call_sid = request.form.get("CallSid")
     speech_result = request.form.get("SpeechResult", "").strip()
     
+    # Check for explicit language change requests
+    language_switch_keywords = {
+        "farsi": "fa-IR", "persian": "fa-IR", "فارسی": "fa-IR",
+        "english": "en-US", "انگلیسی": "en-US",
+        "spanish": "es-ES", "español": "es-ES",
+        "french": "fr-FR", "français": "fr-FR",
+        "german": "de-DE", "deutsch": "de-DE",
+        "italian": "it-IT", "italiano": "it-IT",
+        "japanese": "ja-JP", "日本語": "ja-JP",
+        "chinese": "zh-CN", "中文": "zh-CN",
+        "arabic": "ar-SA", "عربي": "ar-SA",
+        "hindi": "hi-IN", "हिन्दी": "hi-IN",
+        "russian": "ru-RU", "русский": "ru-RU",
+        "portuguese": "pt-BR", "português": "pt-BR",
+    }
+    
+    speech_lower = speech_result.lower() if speech_result else ""
+    
+    # Check if user is requesting a language change
+    for keyword, lang_code in language_switch_keywords.items():
+        if keyword in speech_lower and ("speak" in speech_lower or "use" in speech_lower or "switch" in speech_lower or keyword == speech_lower.strip()):
+            call_languages[call_sid] = lang_code
+            print(f"User requested language switch to {lang_code} for call {call_sid}")
+            # Acknowledge language change
+            response = VoiceResponse()
+            lang_confirmations = {
+                "fa-IR": "بله، حالا به فارسی صحبت می‌کنم. چطور می‌توانم به شما کمک کنم؟",
+                "en-US": "Of course, I'll speak English. How may I assist you?",
+                "es-ES": "Por supuesto, hablaré en español. ¿Cómo puedo ayudarle?",
+                "fr-FR": "Bien sûr, je parlerai en français. Comment puis-je vous aider?",
+                "de-DE": "Natürlich, ich werde Deutsch sprechen. Wie kann ich Ihnen helfen?",
+                "it-IT": "Certamente, parlerò in italiano. Come posso aiutarti?",
+                "ja-JP": "もちろん、日本語で話します。どのようにお手伝いできますか？",
+                "zh-CN": "当然，我会说中文。我能为您做些什么？",
+                "ar-SA": "بالطبع، سأتحدث بالعربية. كيف يمكنني مساعدتك؟",
+                "hi-IN": "बिल्कुल, मैं हिंदी में बोलूंगी। मैं आपकी कैसे मदद कर सकती हूं?",
+                "ru-RU": "Конечно, я буду говорить по-русски. Чем могу помочь?",
+                "pt-BR": "Claro, falarei em português. Como posso ajudá-lo?",
+            }
+            current_lang = lang_code
+            voice = get_voice_for_language(current_lang)
+            response.say(
+                lang_confirmations.get(lang_code, lang_confirmations["en-US"]),
+                voice=voice,
+                language=current_lang
+            )
+            gather = Gather(
+                input="speech",
+                action="/process-speech",
+                method="POST",
+                speech_timeout="auto",
+                language=current_lang  # Use specific language after switch
+            )
+            response.append(gather)
+            return str(response), 200, {"Content-Type": "text/xml"}
+    
     # Detect language from Twilio (if available) or use stored/default
     detected_lang = request.form.get("SpeechLanguage", None)
     if detected_lang:
-        call_languages[call_sid] = detected_lang
-        print(f"Detected language for call {call_sid}: {detected_lang}")
+        # Only update if we haven't explicitly set a language
+        if call_sid not in call_languages or call_languages[call_sid] == "en-US":
+            call_languages[call_sid] = detected_lang
+            print(f"Detected language for call {call_sid}: {detected_lang}")
     
     # Use stored language or default to English
     current_lang = call_languages.get(call_sid, "en-US")
@@ -188,7 +246,7 @@ def process_speech():
         method="POST",
         speech_timeout="auto",
         language="auto",  # Auto-detect language
-        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, yes, no, add, remove, review, checkout, menú, orden, menù, ordine, メニュー, 注文, 菜单, 订单, قائمة, طلب, منو, سفارش, بله, نه"
+        hints="menu, order, price, burger, salad, pasta, dessert, chicken, salmon, beef, yes, no, add, remove, review, checkout, menú, orden, menù, ordine, メニュー, 注文, 菜单, 订单, قائمة, طلب, منو, سفارش, بله, نه, فهرست, غذا, قیمت, اضافه, حذف, بررسی, پرداخت"
     )
     response.append(gather)
     
