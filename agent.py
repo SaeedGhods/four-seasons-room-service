@@ -5,23 +5,22 @@ Handles conversations about menu items and takes orders
 
 import os
 from typing import Dict, List
-import requests
 from menu_data import MENU_CATEGORIES, search_menu, get_category_items, SERVICE_CHARGE_PERCENT, DELIVERY_FEE
-from openai import OpenAI
+import google.generativeai as genai
 
 class RoomServiceAgent:
     def __init__(self):
-        openai_key = os.getenv("OPENAI_API_KEY")
-        self.openai_client = OpenAI(api_key=openai_key) if openai_key and openai_key != "your_openai_api_key" else None
-        self.xai_api_key = os.getenv("XAI_API_KEY")
-        self.xai_model = os.getenv("XAI_MODEL", "grok-4-1-fast-reasoning")
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if gemini_key and gemini_key != "your_gemini_api_key":
+            genai.configure(api_key=gemini_key)
+            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            print(f"Gemini API configured successfully")
+        else:
+            self.gemini_model = None
+            print("Gemini API key not found")
+        
         self.conversation_history: Dict[str, List[Dict]] = {}
         self.active_orders: Dict[str, List[Dict]] = {}
-        
-        # Debug logging
-        print(f"XAI_API_KEY loaded: {'Yes' if self.xai_api_key else 'No'}")
-        if self.xai_api_key:
-            print(f"XAI_API_KEY length: {len(self.xai_api_key)}")
         
     def get_conversation_context(self, call_sid: str) -> str:
         """Get conversation history as context"""
@@ -191,16 +190,13 @@ CRITICAL INSTRUCTIONS:
 - Maintain the "consider it done" approach—gracious, intuitive, and professional
 - Keep responses concise but luxurious—every interaction should feel bespoke"""
 
-        # Always use Grok if available, fallback to OpenAI, then default
-        if self.xai_api_key:
-            print(f"Calling Grok for message: {user_message[:50]}...")
-            response = self._call_grok(prompt)
-        elif self.openai_client:
-            print(f"Falling back to OpenAI for message: {user_message[:50]}...")
-            response = self._call_openai(prompt)
+        # Use Gemini for all AI responses
+        if self.gemini_model:
+            print(f"Calling Gemini for message: {user_message[:50]}...")
+            response = self._call_gemini(prompt, call_sid)
         else:
-            print("No AI available, using default response")
-            response = "I'm here to help with our menu. Would you like to hear about our categories or search for a specific item?"
+            print("Gemini not available, using default response")
+            response = "How may I elevate your dining experience today? I'd be delighted to guide you through our menu or assist with your order."
         
         # Store agent response
         self.conversation_history[call_sid].append({
@@ -210,56 +206,55 @@ CRITICAL INSTRUCTIONS:
         
         return response
 
-    def _call_openai(self, prompt: str) -> str:
-        """Generate response using OpenAI Chat Completions."""
+    def _call_gemini(self, prompt: str, call_sid: str) -> str:
+        """Generate response using Google Gemini - cleaner architecture with better multilingual support"""
         try:
-            completion = self.openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are Nasrin, the dedicated room service concierge at Four Seasons Hotel Toronto. You embody timeless hospitality elegance with a polished, warm, and effortlessly efficient voice. You are anticipatory, discreet, and deeply committed to guest delight. Your communication is refined yet inviting, proactive with tailored suggestions, and you transform requests into curated private dining experiences."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=150,
-                temperature=0.7
-            )
-            return completion.choices[0].message.content.strip()
-        except Exception:
-            return "How may I elevate your dining experience today? I'd be delighted to guide you through our menu or assist with your order."
-
-    def _call_grok(self, prompt: str) -> str:
-        """Generate response using xAI Grok chat completion API."""
-        headers = {
-            "Authorization": f"Bearer {self.xai_api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": self.xai_model,
-            "messages": [
-                {"role": "system", "content": "You are a professional room service agent for Four Seasons Hotel Toronto."},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 300,
-            "temperature": 0.7
-        }
-        try:
-            print(f"Calling Grok model: {self.xai_model}")
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            response.raise_for_status()
-            data = response.json()
-            grok_response = data["choices"][0]["message"]["content"].strip()
-            print(f"Grok response received: {grok_response[:100]}...")
-            return grok_response
+            # Build conversation history for context
+            chat_history = []
+            
+            # Add recent conversation history if available
+            if call_sid in self.conversation_history:
+                for msg in self.conversation_history[call_sid][-6:]:  # Last 6 messages for context
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        chat_history.append({"role": "user", "parts": [content]})
+                    elif role == "assistant":
+                        chat_history.append({"role": "model", "parts": [content]})
+            
+            # Configure the model with system instruction
+            system_instruction = "You are Nasrin, the dedicated room service concierge at Four Seasons Hotel Toronto. You embody timeless hospitality elegance with a polished, warm, and effortlessly efficient voice. You are anticipatory, discreet, and deeply committed to guest delight. Your communication is refined yet inviting, proactive with tailored suggestions, and you transform requests into curated private dining experiences. ALWAYS respond in the SAME LANGUAGE the user is speaking."
+            
+            # Start a chat session with history if available
+            if chat_history:
+                chat = self.gemini_model.start_chat(history=chat_history)
+                full_prompt = f"{system_instruction}\n\n{prompt}"
+                response = chat.send_message(
+                    full_prompt,
+                    generation_config={
+                        "temperature": 0.7,
+                        "max_output_tokens": 300,
+                    }
+                )
+            else:
+                # First message - no history yet
+                full_prompt = f"{system_instruction}\n\n{prompt}"
+                response = self.gemini_model.generate_content(
+                    full_prompt,
+                    generation_config={
+                        "temperature": 0.7,
+                        "max_output_tokens": 300,
+                    }
+                )
+            
+            gemini_response = response.text.strip()
+            print(f"Gemini response received: {gemini_response[:100]}...")
+            return gemini_response
+            
         except Exception as e:
-            print(f"Grok API error: {str(e)}")
-            # Fallback to OpenAI if available
-            if self.openai_client:
-                print("Falling back to OpenAI due to Grok error")
-                return self._call_openai(prompt)
+            print(f"Gemini API error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return "How may I elevate your dining experience today? I'd be delighted to guide you through our menu or assist with your order."
 
 
