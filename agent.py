@@ -29,6 +29,8 @@ class RoomServiceAgent:
         self.room_numbers: Dict[str, str] = {}  # Store room numbers per call
         self.awaiting_room_number: Dict[str, bool] = {}  # Track if we're waiting for room number
         self.order_complete: Dict[str, bool] = {}  # Track if order has been placed
+        self.last_item_added: Dict[str, str] = {}  # Track last item added for confirmation
+        self.conversation_state: Dict[str, str] = {}  # Track conversation state (browsing, ordering, reviewing, completing)
         
     def get_conversation_context(self, call_sid: str) -> str:
         """Get conversation history as context"""
@@ -114,6 +116,7 @@ class RoomServiceAgent:
         if call_sid not in self.conversation_history:
             self.conversation_history[call_sid] = []
             self.active_orders[call_sid] = []
+            self.conversation_state[call_sid] = "browsing"
         
         self.conversation_history[call_sid].append({
             "role": "user",
@@ -157,6 +160,8 @@ class RoomServiceAgent:
                         "quantity": 1
                     }
                     self.active_orders[call_sid].append(order_item)
+                    self.last_item_added[call_sid] = item['name']
+                    self.conversation_state[call_sid] = "ordering"
                     print(f"[ORDER] ✅ Added {item['name']} (${item['price']:.2f}) to order for call {call_sid}. Order now has {len(self.active_orders[call_sid])} items.")
                 else:
                     print(f"[ORDER] ⚠️ Could not find menu item matching: '{search_terms}'. Full message: '{user_message}'")
@@ -190,10 +195,12 @@ class RoomServiceAgent:
             else:
                 # We have room number, place the order and send email
                 print(f"[ORDER] Room number present, placing order...")
+                self.conversation_state[call_sid] = "completing"
                 order_placed = self.place_order(call_sid)
                 if order_placed:
                     # Mark that order is complete
                     self.order_complete[call_sid] = True
+                    self.conversation_state[call_sid] = "complete"
         
         # Extract room number if user provides it
         import re
@@ -221,9 +228,11 @@ class RoomServiceAgent:
             order = self.active_orders.get(call_sid, [])
             if order:
                 print(f"[ORDER] Room number provided, placing order automatically...")
+                self.conversation_state[call_sid] = "completing"
                 order_placed = self.place_order(call_sid)
                 if order_placed:
                     self.order_complete[call_sid] = True
+                    self.conversation_state[call_sid] = "complete"
         
         # Build comprehensive context for xAI (Grok)
         context = self.get_conversation_context(call_sid)
@@ -235,19 +244,29 @@ class RoomServiceAgent:
         has_room = call_sid in self.room_numbers and self.room_numbers[call_sid]
         order = self.active_orders.get(call_sid, [])
         
-        # Build natural, conversational prompt
+        # Build natural, conversational prompt with better state awareness
         order_status = ""
+        state = self.conversation_state.get(call_sid, "browsing")
+        last_item = self.last_item_added.get(call_sid, "")
+        
         if order:
             if awaiting_room and not has_room:
-                order_status = "CRITICAL: The customer wants to place an order but hasn't provided their room number yet. You MUST ask for their room number NOW in a friendly, direct way. Say something like 'May I have your room number, please?' or 'What room number should I deliver this to?'"
+                order_status = "CRITICAL: The customer wants to complete their order but hasn't provided their room number yet. You MUST ask for their room number NOW in a friendly, natural way. Say something like 'Perfect! May I have your room number, please?' or 'What room number should I deliver this to?'"
             elif has_room and not self.order_complete.get(call_sid, False):
-                order_status = f"The customer has provided room number {self.room_numbers[call_sid]}. If they confirm they're done or say goodbye, the order will be placed automatically."
+                # Show order summary before finalizing
+                subtotal = sum(item['price'] * item.get('quantity', 1) for item in order)
+                service_charge = subtotal * (SERVICE_CHARGE_PERCENT / 100)
+                total = subtotal + service_charge + DELIVERY_FEE
+                order_status = f"The customer has provided room number {self.room_numbers[call_sid]}. You have {len(order)} item(s) ready. When they confirm, summarize: '{len(order)} item(s), total ${total:.2f} including service charge and delivery. Delivery in 30-45 minutes.' Then confirm the order is placed."
             elif self.order_complete.get(call_sid, False):
-                order_status = "The order has already been placed. Thank the customer and wish them a pleasant stay."
+                order_status = "The order has already been placed and confirmed. Thank the customer warmly and wish them a pleasant stay. Keep it brief."
             elif not has_room:
                 # We have items but no room number - if they say no/decline, ask for room number
                 if is_negative_completion or (message_lower in ["no", "no thank you", "no thanks", "no, thank you", "no, thanks"]):
-                    order_status = "CRITICAL: The customer has items in their order and just declined further items. You MUST ask for their room number NOW to complete the order. Say 'May I have your room number, please?'"
+                    order_status = "CRITICAL: The customer has items in their order and just declined further items. You MUST ask for their room number NOW to complete the order. Say something like 'Perfect! May I have your room number, please?' in a friendly, natural way."
+                elif last_item:
+                    # Just added an item - confirm and offer to add more
+                    order_status = f"You just added {last_item} to their order. Confirm it was added, mention the current order total, and naturally ask if they'd like anything else. Be conversational, not robotic."
         
         prompt = f"""You are Nasrin, a warm and professional room service concierge at Four Seasons Hotel Toronto. You're speaking on the phone, so be natural, conversational, and concise.
 
@@ -265,17 +284,18 @@ CONVERSATION HISTORY:
 CUSTOMER JUST SAID: "{user_message}"
 
 YOUR RESPONSE GUIDELINES:
-- Speak naturally and warmly, like a real person on the phone
+- Speak naturally and warmly, like a real person on the phone - not a robot
 - ALWAYS respond in the EXACT SAME LANGUAGE the customer is speaking
-- Keep responses brief (1-2 sentences) - this is a phone call, not a text conversation
-- Be helpful and professional, but friendly and conversational
-- When they ask about menu items: give them the item name, brief description, and price clearly
-- When they order something: warmly confirm what they ordered and the price
-- When they want to review their order: clearly list each item and the total
-- When placing order: {"CRITICAL: You MUST ask for their room number RIGHT NOW. Say something like 'Perfect! May I have your room number, please?' or 'What room number should I deliver this to?'" if awaiting_room and not has_room and order else "Confirm the order total and delivery time (30-45 minutes) warmly, then thank them"}
-- If they provide a room number: acknowledge it warmly, confirm the order is placed, and thank them
+- Keep responses brief (1-2 sentences max) - this is a phone call, be concise
+- Be helpful, professional, friendly, and conversational - sound human
+- When they ask about menu items: give item name, brief description, and price clearly and naturally
+- When they order something: warmly confirm what they ordered and the price, then naturally ask if they'd like anything else
+- When they want to review their order: clearly list each item and the total in a friendly way
+- When placing order: {"CRITICAL: You MUST ask for their room number RIGHT NOW in a natural, friendly way. Say something like 'Perfect! May I have your room number, please?' or 'What room number should I deliver this to?'" if awaiting_room and not has_room and order else "If they have a room number, confirm the order: summarize items, total price, and delivery time (30-45 minutes) warmly, then thank them"}
+- If they provide a room number: acknowledge it warmly, confirm the order is placed with a brief summary, and thank them
 - If they say goodbye or seem done: {"Ask for room number if you have items but no room number" if order and not has_room else "Thank them warmly and wish them a pleasant stay"}
-- Sound natural and human - avoid robotic phrases"""
+- Be proactive but not pushy - guide the conversation naturally
+- Sound natural and human - avoid robotic phrases like 'How may I assist you today?' - be more casual and warm"""
 
         # Use xAI (Grok) for all AI responses
         if self.xai_api_key:
@@ -325,9 +345,11 @@ YOUR RESPONSE GUIDELINES:
             data = {
                 "model": self.xai_model,
                 "messages": messages,
-                "temperature": 0.8,  # Slightly higher for more natural, varied responses
-                "max_tokens": 200,  # Allow slightly longer for more natural responses
-                "top_p": 0.9,  # Nucleus sampling for better quality
+                "temperature": 0.85,  # Higher for more natural, varied, human-like responses
+                "max_tokens": 180,  # Optimal length for phone conversations
+                "top_p": 0.95,  # Higher for more creative, natural responses
+                "frequency_penalty": 0.3,  # Reduce repetition
+                "presence_penalty": 0.2,  # Encourage new topics
             }
             
             response = requests.post(url, headers=headers, json=data, timeout=10)
