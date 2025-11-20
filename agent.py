@@ -192,27 +192,40 @@ class RoomServiceAgent:
         has_room = call_sid in self.room_numbers and self.room_numbers[call_sid]
         order = self.active_orders.get(call_sid, [])
         
-        prompt = f"""You are Nasrin, room service concierge at Four Seasons Toronto. Be professional, helpful, and concise.
+        # Build natural, conversational prompt
+        order_status = ""
+        if order:
+            if awaiting_room and not has_room:
+                order_status = "IMPORTANT: The customer wants to place an order but hasn't provided their room number yet. You MUST ask for their room number in a friendly way before confirming the order."
+            elif has_room:
+                order_status = f"The customer has provided room number {self.room_numbers[call_sid]}. If they confirm the order, it will be placed automatically."
+        
+        prompt = f"""You are Nasrin, a warm and professional room service concierge at Four Seasons Hotel Toronto. You're speaking on the phone, so be natural, conversational, and concise.
 
+MENU INFORMATION:
 {menu_info}
 
+CURRENT ORDER STATUS:
 {order_info}
 
-Recent conversation:
+{order_status}
+
+CONVERSATION HISTORY:
 {context}
 
-User said: {user_message}
+CUSTOMER JUST SAID: "{user_message}"
 
-INSTRUCTIONS:
-- ALWAYS respond in the SAME LANGUAGE the user is speaking
-- Keep responses SHORT: 1-2 sentences max for phone conversations
-- Be direct and helpful—no flowery language or excessive pleasantries
-- When they ask about menu: give specific items and prices quickly
-- When they order: confirm the item and price (items are auto-added)
-- When reviewing order: state items and total clearly
-- When placing order: {"FIRST ask for their room number before confirming the order" if awaiting_room and not has_room and order else "confirm total and delivery time (30-45 minutes)"}
-- If they provide a room number: acknowledge it warmly
-- Answer questions directly without extra fluff"""
+YOUR RESPONSE GUIDELINES:
+- Speak naturally and warmly, like a real person on the phone
+- ALWAYS respond in the EXACT SAME LANGUAGE the customer is speaking
+- Keep responses brief (1-2 sentences) - this is a phone call, not a text conversation
+- Be helpful and professional, but friendly and conversational
+- When they ask about menu items: give them the item name, brief description, and price clearly
+- When they order something: warmly confirm what they ordered and the price
+- When they want to review their order: clearly list each item and the total
+- When placing order: {"Ask for their room number in a friendly way: 'May I have your room number, please?'" if awaiting_room and not has_room and order else "Confirm the order total and delivery time (30-45 minutes) warmly"}
+- If they provide a room number: acknowledge it warmly and confirm you have it
+- Sound natural and human - avoid robotic phrases"""
 
         # Use xAI (Grok) for all AI responses
         if self.xai_api_key:
@@ -253,7 +266,7 @@ INSTRUCTIONS:
             # Add current prompt
             messages.append({"role": "user", "content": prompt})
             
-            # Call xAI API
+            # Call xAI API with optimized settings for natural conversation
             url = "https://api.x.ai/v1/chat/completions"
             headers = {
                 "Authorization": f"Bearer {self.xai_api_key}",
@@ -262,8 +275,9 @@ INSTRUCTIONS:
             data = {
                 "model": self.xai_model,
                 "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 150  # Shorter responses for phone
+                "temperature": 0.8,  # Slightly higher for more natural, varied responses
+                "max_tokens": 200,  # Allow slightly longer for more natural responses
+                "top_p": 0.9,  # Nucleus sampling for better quality
             }
             
             response = requests.post(url, headers=headers, json=data, timeout=10)
@@ -336,26 +350,32 @@ This is an automated order notification from the Four Seasons Room Service Phone
             email_password = os.getenv("EMAIL_PASSWORD")
             recipient_email = os.getenv("ORDER_EMAIL", "saeedghods@me.com")
             
+            print(f"[EMAIL] Config check - Server: {smtp_server}, Port: {smtp_port}, From: {email_user}, To: {recipient_email}")
+            
             if not email_user or not email_password:
-                print("Email credentials not configured. Set EMAIL_USER and EMAIL_PASSWORD environment variables.")
+                print(f"[EMAIL] ❌ Email credentials not configured. EMAIL_USER: {'SET' if email_user else 'MISSING'}, EMAIL_PASSWORD: {'SET' if email_password else 'MISSING'}")
                 return False
             
             # Create message
             msg = MIMEMultipart()
             msg['From'] = email_user
             msg['To'] = recipient_email
-            msg['Subject'] = f"New Room Service Order - Room {room_number} - ${final_total:.2f}"
+            msg['Subject'] = f"🍽️ New Room Service Order - Room {room_number} - ${final_total:.2f}"
             
             msg.attach(MIMEText(email_body, 'plain'))
             
-            # Send email
-            server = smtplib.SMTP(smtp_server, smtp_port)
+            # Send email with better error handling
+            print(f"[EMAIL] Attempting to connect to {smtp_server}:{smtp_port}")
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+            print(f"[EMAIL] Starting TLS...")
             server.starttls()
+            print(f"[EMAIL] Logging in as {email_user}...")
             server.login(email_user, email_password)
+            print(f"[EMAIL] Sending message to {recipient_email}...")
             server.send_message(msg)
             server.quit()
             
-            print(f"Order email sent successfully for call {call_sid} to {recipient_email}")
+            print(f"[EMAIL] ✅ Order email sent successfully for call {call_sid} to {recipient_email}")
             return True
             
         except Exception as e:
@@ -370,12 +390,14 @@ This is an automated order notification from the Four Seasons Room Service Phone
         room_number = self.room_numbers.get(call_sid)
         
         if not order:
-            print(f"No order to place for call {call_sid}")
+            print(f"[ORDER] No order to place for call {call_sid}")
             return False
         
         if not room_number:
-            print(f"Cannot place order without room number for call {call_sid}")
+            print(f"[ORDER] Cannot place order without room number for call {call_sid}")
             return False
+        
+        print(f"[ORDER] Attempting to place order for call {call_sid}, room {room_number}, {len(order)} items")
         
         # Send email
         email_sent = self.send_order_email(call_sid)
@@ -384,10 +406,11 @@ This is an automated order notification from the Four Seasons Room Service Phone
             # Clear order after successful email
             self.active_orders[call_sid] = []
             self.awaiting_room_number[call_sid] = False
-            print(f"Order placed and cleared for call {call_sid}")
+            print(f"[ORDER] ✅ Order successfully placed and email sent for call {call_sid}, room {room_number}")
             return True
         else:
-            print(f"Order email failed for call {call_sid}, order not cleared")
+            print(f"[ORDER] ❌ Order email failed for call {call_sid}, order NOT cleared - will retry")
+            # Don't clear order if email fails - allows retry
             return False
 
 

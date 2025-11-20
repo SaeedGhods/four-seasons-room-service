@@ -108,9 +108,9 @@ def get_twilio_language_code(lang_code):
     return twilio_lang_map.get(lang_code, lang_code)
 
 def get_gcp_tts_voice(lang_code):
-    """Get Google Cloud TTS voice name and language code - excellent Farsi support"""
+    """Get Google Cloud TTS voice name and language code - using premium Neural2 voices for natural sound"""
     # Google Cloud TTS voice mapping - format: (voice_name, language_code)
-    # Google Cloud has native Farsi voices which are much better than OpenAI
+    # Using Neural2 voices for most natural, human-like sound
     voice_map = {
         "en-US": ("en-US-Neural2-F", "en-US"),
         "es-ES": ("es-ES-Neural2-F", "es-ES"),
@@ -123,8 +123,8 @@ def get_gcp_tts_voice(lang_code):
         "ko-KR": ("ko-KR-Neural2-C", "ko-KR"),
         "zh-CN": ("zh-CN-Neural2-C", "zh-CN"),
         "zh-TW": ("zh-TW-Neural2-C", "zh-TW"),
-        "ar-SA": ("ar-XA-Wavenet-B", "ar-XA"),  # Arabic
-        "fa-IR": ("ar-XA-Wavenet-B", "ar-XA"),  # Farsi - use Arabic voice (closest available, works well for Farsi)
+        "ar-SA": ("ar-XA-Neural2-C", "ar-XA"),  # Arabic - Neural2 for more natural sound
+        "fa-IR": ("ar-XA-Neural2-C", "ar-XA"),  # Farsi - use Arabic Neural2 (more natural than Wavenet)
         "hi-IN": ("hi-IN-Neural2-D", "hi-IN"),
         "ru-RU": ("ru-RU-Neural2-D", "ru-RU"),
         "nl-NL": ("nl-NL-Neural2-C", "nl-NL"),
@@ -134,7 +134,7 @@ def get_gcp_tts_voice(lang_code):
         "da-DK": ("da-DK-Neural2-D", "da-DK"),
         "no-NO": ("nb-NO-Neural2-C", "nb-NO"),
         "fi-FI": ("fi-FI-Neural2-C", "fi-FI"),
-        "cs-CZ": ("cs-CZ-Wavenet-A", "cs-CZ"),
+        "cs-CZ": ("cs-CZ-Neural2-A", "cs-CZ"),  # Neural2 if available
         "hu-HU": ("hu-HU-Neural2-A", "hu-HU"),
         "ro-RO": ("ro-RO-Neural2-A", "ro-RO"),
         "th-TH": ("th-TH-Neural2-C", "th-TH"),
@@ -218,11 +218,12 @@ def generate_audio_with_gcp(text, lang_code, base_url):
         # Configure the synthesis input
         synthesis_input = texttospeech.SynthesisInput(text=text)
         
-        # Select the type of audio file you want returned
+        # Select the type of audio file you want returned - optimized for natural voice
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=0.95,  # Slightly slower for clarity
-            pitch=0.0,
+            speaking_rate=1.0,  # Natural speaking rate (was 0.95 - too slow/robotic)
+            pitch=2.0,  # Slightly higher pitch for more natural, friendly voice (was 0.0)
+            volume_gain_db=2.0,  # Slightly louder for clarity
         )
         
         # Build the voice request - only include name if specified
