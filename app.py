@@ -48,7 +48,8 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_
 @app.route("/", methods=["GET"])
 def health_check():
     """Health check endpoint"""
-    return "Four Seasons Room Service Agent is running!", 200
+    version = get_version_timestamp()
+    return f"Four Seasons Room Service Agent is running! Version: {version}", 200
 
 
 def get_voice_for_language(lang_code):
