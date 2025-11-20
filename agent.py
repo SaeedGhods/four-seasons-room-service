@@ -162,6 +162,7 @@ Recent conversation:
 User just said: {user_message}
 
 IMPORTANT INSTRUCTIONS:
+- ALWAYS respond in the SAME LANGUAGE the user is speaking (English, Spanish, French, German, Italian, Japanese, Chinese, Arabic, Hindi, Russian, Portuguese, etc.)
 - Respond naturally and conversationally (2-3 sentences max for phone)
 - If they're asking about menu items, provide specific information from the menu above
 - If they want to order something, acknowledge it warmly (items are automatically added when they mention wanting something)
