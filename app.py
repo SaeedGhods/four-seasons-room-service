@@ -99,6 +99,14 @@ def get_voice_for_language(lang_code):
     # Default to alice for English if language not found
     return voice_map.get(lang_code, "alice")
 
+def get_twilio_language_code(lang_code):
+    """Map language codes to Twilio-supported language codes"""
+    # Twilio doesn't support fa-IR, use Arabic which is closest
+    twilio_lang_map = {
+        "fa-IR": "ar-SA",  # Use Arabic for Farsi (closest supported language)
+    }
+    return twilio_lang_map.get(lang_code, lang_code)
+
 def get_gcp_tts_voice(lang_code):
     """Get Google Cloud TTS voice name and language code - excellent Farsi support"""
     # Google Cloud TTS voice mapping - format: (voice_name, language_code)
@@ -116,7 +124,7 @@ def get_gcp_tts_voice(lang_code):
         "zh-CN": ("zh-CN-Neural2-C", "zh-CN"),
         "zh-TW": ("zh-TW-Neural2-C", "zh-TW"),
         "ar-SA": ("ar-XA-Wavenet-B", "ar-XA"),  # Arabic
-        "fa-IR": ("fa-IR-Standard-A", "fa-IR"),  # Farsi - Google has native support!
+        "fa-IR": ("", "fa-IR"),  # Farsi - let Google pick default voice (more reliable)
         "hi-IN": ("hi-IN-Neural2-D", "hi-IN"),
         "ru-RU": ("ru-RU-Neural2-D", "ru-RU"),
         "nl-NL": ("nl-NL-Neural2-C", "nl-NL"),
@@ -210,11 +218,17 @@ def generate_audio_with_gcp(text, lang_code, base_url):
         # Configure the synthesis input
         synthesis_input = texttospeech.SynthesisInput(text=text)
         
-        # Build the voice request
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=language_code,
-            name=voice_name,
-        )
+        # Build the voice request - only include name if specified
+        if voice_name:
+            voice = texttospeech.VoiceSelectionParams(
+                language_code=language_code,
+                name=voice_name,
+            )
+        else:
+            # Use default voice for language
+            voice = texttospeech.VoiceSelectionParams(
+                language_code=language_code,
+            )
         
         # Select the type of audio file you want returned
         audio_config = texttospeech.AudioConfig(
@@ -224,11 +238,26 @@ def generate_audio_with_gcp(text, lang_code, base_url):
         )
         
         # Perform the text-to-speech request
-        response = gcp_tts_client.synthesize_speech(
-            input=synthesis_input,
-            voice=voice,
-            audio_config=audio_config
-        )
+        try:
+            response = gcp_tts_client.synthesize_speech(
+                input=synthesis_input,
+                voice=voice,
+                audio_config=audio_config
+            )
+        except Exception as voice_error:
+            # If specific voice fails, try without voice name (use default for language)
+            if "does not exist" in str(voice_error) or "Voice" in str(voice_error):
+                print(f"Voice {voice_name} not found, trying with language code only")
+                voice = texttospeech.VoiceSelectionParams(
+                    language_code=language_code,
+                )
+                response = gcp_tts_client.synthesize_speech(
+                    input=synthesis_input,
+                    voice=voice,
+                    audio_config=audio_config
+                )
+            else:
+                raise  # Re-raise if it's a different error
         
         # Save to temporary file
         audio_id = str(uuid.uuid4())
