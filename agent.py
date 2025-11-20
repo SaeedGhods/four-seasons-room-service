@@ -127,12 +127,24 @@ class RoomServiceAgent:
         order_intent_keywords = ["i want", "i'd like", "add", "get me", "order", "i'll take", "i'll have", 
                                 "can i get", "can i have", "give me", "i need", "bring me"]
         
-        if any(word in message_lower for word in order_intent_keywords):
-            # Try to find menu item
-            search_terms = user_message
-            for word in ["order", "i'll take", "i'll have", "i want", "i'd like", "add", "get me", "please", 
-                        "can i have", "can i get", "give me", "i need", "bring me", "a", "an", "the"]:
-                search_terms = search_terms.replace(word, "").strip()
+        # Check if message contains order intent
+        has_order_intent = any(word in message_lower for word in order_intent_keywords)
+        
+        if has_order_intent:
+            # Try to find menu item - be smarter about extracting item name
+            search_terms = user_message.lower()
+            
+            # Remove common phrases but keep the item name
+            remove_words = ["order", "i'll take", "i'll have", "i want", "i'd like", "add", "get me", "please", 
+                           "can i have", "can i get", "give me", "i need", "bring me", "a ", "an ", "the ",
+                           "i'd", "i'll", "i want", "me", "for"]
+            for word in remove_words:
+                search_terms = search_terms.replace(word, " ").strip()
+            
+            # Clean up extra spaces
+            search_terms = " ".join(search_terms.split())
+            
+            print(f"[ORDER] Searching for menu item with terms: '{search_terms}'")
             
             if search_terms:
                 items = search_menu(search_terms)
@@ -145,9 +157,9 @@ class RoomServiceAgent:
                         "quantity": 1
                     }
                     self.active_orders[call_sid].append(order_item)
-                    print(f"[ORDER] ✅ Added {item['name']} to order for call {call_sid}. Order now has {len(self.active_orders[call_sid])} items.")
+                    print(f"[ORDER] ✅ Added {item['name']} (${item['price']:.2f}) to order for call {call_sid}. Order now has {len(self.active_orders[call_sid])} items.")
                 else:
-                    print(f"[ORDER] ⚠️ Could not find menu item matching: {search_terms}")
+                    print(f"[ORDER] ⚠️ Could not find menu item matching: '{search_terms}'. Full message: '{user_message}'")
         
         # Check if user wants to place/complete order - expanded keywords
         # Separate positive completion from negative responses
