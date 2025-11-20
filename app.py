@@ -133,9 +133,13 @@ def process_speech():
     call_sid = request.form.get("CallSid")
     speech_result = request.form.get("SpeechResult", "").strip()
     
-    # Check for explicit language change requests
+    # Log what Twilio transcribed
+    print(f"Twilio transcribed for call {call_sid}: '{speech_result}'")
+    
+    # Check for explicit language change requests FIRST, before any other processing
     language_switch_keywords = {
         "farsi": "fa-IR", "persian": "fa-IR", "فارسی": "fa-IR",
+        "far see": "fa-IR", "farcy": "fa-IR", "farsy": "fa-IR",  # Common mis-transcriptions
         "english": "en-US", "انگلیسی": "en-US",
         "spanish": "es-ES", "español": "es-ES",
         "french": "fr-FR", "français": "fr-FR",
@@ -149,13 +153,65 @@ def process_speech():
         "portuguese": "pt-BR", "português": "pt-BR",
     }
     
-    speech_lower = speech_result.lower() if speech_result else ""
+    speech_lower = speech_result.lower().strip() if speech_result else ""
     
-    # Check if user is requesting a language change
+    # Check if user is requesting a language change - be more lenient
+    # First, check if message is very short and matches a language keyword exactly
+    if len(speech_lower.split()) <= 2:  # Short message (1-2 words)
+        for keyword, lang_code in language_switch_keywords.items():
+            if keyword in speech_lower and (speech_lower == keyword or speech_lower.startswith(keyword) or speech_lower.endswith(keyword)):
+                call_languages[call_sid] = lang_code
+                print(f"User requested language switch to {lang_code} for call {call_sid}. Original message: '{speech_result}'")
+                # Acknowledge language change
+                response = VoiceResponse()
+                lang_confirmations = {
+                    "fa-IR": "بله، حالا به فارسی صحبت می‌کنم. چطور می‌توانم به شما کمک کنم؟",
+                    "en-US": "Of course, I'll speak English. How may I assist you?",
+                    "es-ES": "Por supuesto, hablaré en español. ¿Cómo puedo ayudarle?",
+                    "fr-FR": "Bien sûr, je parlerai en français. Comment puis-je vous aider?",
+                    "de-DE": "Natürlich, ich werde Deutsch sprechen. Wie kann ich Ihnen helfen?",
+                    "it-IT": "Certamente, parlerò in italiano. Come posso aiutarti?",
+                    "ja-JP": "もちろん、日本語で話します。どのようにお手伝いできますか？",
+                    "zh-CN": "当然，我会说中文。我能为您做些什么？",
+                    "ar-SA": "بالطبع، سأتحدث بالعربية. كيف يمكنني مساعدتك؟",
+                    "hi-IN": "बिल्कुल, मैं हिंदी में बोलूंगी। मैं आपकी कैसे मदद कर सकती हूं?",
+                    "ru-RU": "Конечно, я буду говорить по-русски. Чем могу помочь?",
+                    "pt-BR": "Claro, falarei em português. Como posso ajudá-lo?",
+                }
+                current_lang = lang_code
+                voice = get_voice_for_language(current_lang)
+                response.say(
+                    lang_confirmations.get(lang_code, lang_confirmations["en-US"]),
+                    voice=voice,
+                    language=current_lang
+                )
+                gather = Gather(
+                    input="speech",
+                    action="/process-speech",
+                    method="POST",
+                    speech_timeout="auto",
+                    language=current_lang  # Use specific language after switch
+                )
+                response.append(gather)
+                return str(response), 200, {"Content-Type": "text/xml"}
+    
+    # Check if message contains language switch phrases
     for keyword, lang_code in language_switch_keywords.items():
-        if keyword in speech_lower and ("speak" in speech_lower or "use" in speech_lower or "switch" in speech_lower or keyword == speech_lower.strip()):
+        # Check if the message is just the keyword, or contains language switch phrases
+        is_language_request = (
+            speech_lower == keyword or
+            speech_lower == f"speak {keyword}" or
+            speech_lower == f"use {keyword}" or
+            speech_lower == f"switch to {keyword}" or
+            speech_lower == f"switch {keyword}" or
+            f"speak {keyword}" in speech_lower or
+            f"use {keyword}" in speech_lower or
+            f"switch to {keyword}" in speech_lower
+        )
+        
+        if is_language_request:
             call_languages[call_sid] = lang_code
-            print(f"User requested language switch to {lang_code} for call {call_sid}")
+            print(f"User requested language switch to {lang_code} for call {call_sid}. Original message: '{speech_result}'")
             # Acknowledge language change
             response = VoiceResponse()
             lang_confirmations = {
